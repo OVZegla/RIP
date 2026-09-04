@@ -6,7 +6,7 @@ Source : dossier « RIP UltraPrint (HK i1600) — fonctionnement interne » v4 (
 (non établi par l'analyse statique — à lever par l'expérience, cf.
 `docs/calibration.md`).
 
-Cette page est la référence normative pour `ripcore.prn`. Toute divergence entre
+Cette page est la référence normative pour `ripcore.prnfile`. Toute divergence entre
 le code et cette page est un bug de l'un ou de l'autre.
 
 ---

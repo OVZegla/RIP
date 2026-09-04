@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from .errors import RipError
-from .prn.reader import PrnReader
+from .prnfile.reader import PrnReader
 from .profiles import ROLE_VARNISH, ROLE_WHITE, PrinterProfile
 
 # Couleurs d'encre approchées, en sRGB linéaire de travail.

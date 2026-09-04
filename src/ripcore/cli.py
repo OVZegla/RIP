@@ -24,8 +24,8 @@ from .calibration import (
 from .errors import RipError, UnverifiedError
 from .halftone.engines import make_halftoner
 from .pipeline import JobSpec, run_job, write_target_prn
-from .prn.reader import probe
-from .prn.validate import validate_prn
+from .prnfile.reader import probe
+from .prnfile.validate import validate_prn
 from .profiles import MediaProfile, PrinterProfile
 from .targets import channel_id, drop_wedge, lin_wedge
 

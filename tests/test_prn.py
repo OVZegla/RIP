@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from ripcore.errors import PrnFormatError
-from ripcore.prn import (
+from ripcore.prnfile import (
     HEADER_SIZE,
     MARKER,
     PrnHeader,

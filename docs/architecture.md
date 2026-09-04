@@ -33,7 +33,7 @@ ripcore/
 ├── profiles.py       PrinterProfile, MediaProfile — tout le spécifique machine
 ├── errors.py         hiérarchie d'exceptions
 │
-├── prn/              LE CONTENEUR — la partie qui doit être exacte au bit près
+├── prnfile/          LE CONTENEUR — la partie qui doit être exacte au bit près
 │   ├── header.py       en-tête 48 o, sans numpy, trivial à relire
 │   ├── pack.py         empaquetage 1/2/4/8 bpp, MSB d'abord
 │   ├── writer.py       écriture en flux, atomique

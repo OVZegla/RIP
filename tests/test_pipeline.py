@@ -32,7 +32,7 @@ from ripcore.color.inklimit import PRESERVE_BLACK
 from ripcore.errors import CalibrationError, ProfileError, RipError
 from ripcore.halftone import BlueNoiseHalftoner, density_of
 from ripcore.pipeline import JobSpec, run_job
-from ripcore.prn import PrnReader, validate_prn
+from ripcore.prnfile import PrnReader, validate_prn
 from ripcore.profiles import Channel, DropLevels, MediaProfile, PrinterProfile
 
 PROFILE_PATH = "profiles/friankor-i1600.toml"
@@ -359,7 +359,7 @@ class TestEndToEnd:
         assert tourne.width_mm / tourne.height_mm == pytest.approx(0.5, abs=0.05)
 
     def test_validateur_detecte_un_pass_mode_faux(self, tmp_path, printer):
-        from ripcore.prn import PrnWriter
+        from ripcore.prnfile import PrnWriter
 
         out = tmp_path / "mauvais.prn"
         with PrnWriter(out, dpi_x=720, dpi_y=900, width_px=64, channels=5,
@@ -370,7 +370,7 @@ class TestEndToEnd:
         assert any("pass_mode" in f.check for f in report.errors)
 
     def test_validateur_detecte_un_raster_vide(self, tmp_path, printer):
-        from ripcore.prn import PrnWriter
+        from ripcore.prnfile import PrnWriter
 
         out = tmp_path / "vide.prn"
         with PrnWriter(out, dpi_x=720, dpi_y=900, width_px=64, channels=5,
@@ -382,7 +382,7 @@ class TestEndToEnd:
 
     def test_validateur_detecte_un_depassement_d_encre(self, tmp_path, printer):
         """Un raster saturé sur les 4 canaux process dépasse forcément le TAC."""
-        from ripcore.prn import PrnWriter
+        from ripcore.prnfile import PrnWriter
 
         out = tmp_path / "sature.prn"
         levels = np.zeros((5, 64, 64), dtype=np.uint8)

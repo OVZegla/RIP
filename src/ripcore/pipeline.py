@@ -30,7 +30,7 @@ from .color.white import underbase, varnish
 from .errors import RipError
 from .halftone.engines import Halftoner, make_halftoner
 from .inputs.source import MM_PER_INCH, SourceImage, fit_geometry, load_source
-from .prn.writer import PrnWriter
+from .prnfile.writer import PrnWriter
 from .profiles import (
     ROLE_PROCESS,
     ROLE_VARNISH,

@@ -16,6 +16,9 @@ dev = ["pytest>=8", "pillow>=10"]
 [project.scripts]
 rip = "ripcore.cli:main"
 
+[project.gui-scripts]
+atelier-impression = "ripcore.ui.app:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

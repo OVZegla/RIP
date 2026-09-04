@@ -24,9 +24,59 @@ pip install -e ".[images]"     # numpy + Pillow (Pillow embarque lcms2 pour l'IC
 apt install ghostscript        # seulement si vous rippez des PDF / PS
 ```
 
-Python 3.11 ou plus.
+Python 3.11 ou plus. Tkinter est fourni avec Python sur Windows et macOS ; sous
+Linux, `apt install python3-tk`.
 
-## En deux minutes
+---
+
+## L'interface
+
+C'est par là que passe l'atelier. Double-cliquez sur **« Lancer l'atelier.bat »**,
+ou :
+
+```bash
+python -m ripcore.ui
+```
+
+Quatre écrans, pas de menus déroulants, tout dans la colonne de gauche en
+permanence :
+
+| Écran | Ce qu'on y fait |
+|---|---|
+| **Imprimer** | Choisir un visuel, sa taille, son rendu ; préparer ; envoyer |
+| **Tests machine** | Les trois tests de réglage, expliqués et numérotés |
+| **Ma presse** | Ordre des encres, quantité d'encre, largeur maximale |
+| **Historique** | Retrouver et renvoyer un travail déjà préparé |
+
+Trois partis pris :
+
+**Aucun terme d'ingénieur à l'écran.** Pas de « RIP », « tramage », « dpi »,
+« canal », « linéarisation ». Le vocabulaire visible est rassemblé dans
+`src/ripcore/ui/textes.py` — un imprimeur peut relire ce fichier d'un bout à
+l'autre et corriger un mot qui ne se dit pas dans le métier, sans toucher au
+code. Un test vérifie qu'aucun jargon ne repasse par la fenêtre.
+
+**Le rouge est réservé aux problèmes.** Bleu pour tout le reste, réussite
+comprise. Un rouge décoratif rendrait le rouge d'alerte invisible.
+
+**Rien ne fige la fenêtre.** Les travaux tournent dans un fil séparé avec une
+barre d'avancement : un mural de 2 m met plusieurs minutes, et une fenêtre qui
+ne répond plus se fait fermer au milieu de l'écriture du fichier.
+
+L'écran « Tests machine » porte le moment le plus important de l'installation :
+après avoir imprimé le test n° 1, l'opérateur indique dans une simple liste
+déroulante quelle couleur est sortie sur chaque barre. C'est ce qui transforme
+la presse d'inconnue en machine réglée — et ça remplace l'édition d'un fichier
+de configuration à la main.
+
+---
+
+## La ligne de commande
+
+Tout ce que fait l'interface est disponible en ligne de commande, pour le
+réglage fin et les scripts.
+
+### En deux minutes
 
 ```bash
 # 1. Décrire un .prn existant (le vôtre, ou un produit par UltraPrint)
@@ -177,6 +227,7 @@ fichier présent sur le disque est un fichier complet.
 | [docs/architecture.md](docs/architecture.md) | Carte des modules, décisions de conception, ce qui reste |
 | [docs/calibration.md](docs/calibration.md) | Procédure de calibration détaillée |
 | [docs/licences.md](docs/licences.md) | Dépendances, ICC, cadre de la rétro-ingénierie |
+| `src/ripcore/ui/textes.py` | Tout le vocabulaire affiché, à relire et corriger |
 
 ## Tests
 
@@ -186,5 +237,10 @@ python -m pytest -q
 
 Les tests ne se contentent pas de vérifier que le code fait ce qu'il fait : ils
 rejouent la géométrie des 5 `.prn` de production, simulent une machine à réponse
-connue pour vérifier que la calibration la retrouve, et vérifient l'invariance
-du tramage au découpage en bandes.
+connue pour vérifier que la calibration la retrouve, vérifient l'invariance du
+tramage au découpage en bandes, et refusent qu'un terme technique atteigne
+l'écran de l'opérateur.
+
+L'interface elle-même est vérifiée par un parcours à l'écran (fenêtre réelle,
+sans affichage) : les quatre écrans s'ouvrent, un travail complet est préparé
+dans le fil d'arrière-plan, l'aperçu s'affiche et l'historique se remplit.

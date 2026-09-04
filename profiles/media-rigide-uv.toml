@@ -1,0 +1,28 @@
+# Profil média — support rigide non blanc, encre UV.
+#
+# Les chemins ICC sont relatifs à ce fichier. Les profils de sortie livrés avec
+# la machine se trouvent dans :
+#   ICC Profile/Output/Epson-W5113/{A,B,C}-720x{900,1200}-I1600-{5,10}MM-uv-HK-NEW.icm
+# Un profil par (résolution × distance tête–support) : prenez celui qui
+# correspond à la hauteur Z réellement utilisée, sinon la couleur dérive.
+
+[media]
+name = "Support rigide UV — 720x900, tête à 5 mm"
+
+# icc_output = "../icc/A-720x900-I1600-5MM-uv-HK-NEW.icm"
+# icc_input_rgb = "../icc/sRGB.icc"
+# icc_input_cmyk = "../icc/ISOcoated_v2.icc"
+rendering_intent = "perceptual"
+
+# linearization = "../calib/rigide-uv-720x900.json"
+
+# Sous-couche blanche : indispensable sur support non blanc.
+white_underbase = true
+white_density = 1.0
+white_choke_px = 2
+
+# Surcharge la limite totale du profil imprimante si le support est plus
+# sensible (film, support fermé, forte épaisseur d'encre).
+# ink_limit_total = 2.4
+
+notes = "Valeurs de départ. À caler par essais avant toute production."

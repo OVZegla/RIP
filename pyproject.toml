@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ripcore"
+version = "0.1.0"
+description = "RIP for Epson I1600 wall/flatbed UV printers driven by BetterPrinter"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+images = ["pillow>=10"]
+dev = ["pytest>=8", "pillow>=10"]
+
+[project.scripts]
+rip = "ripcore.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]

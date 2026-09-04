@@ -1,0 +1,80 @@
+# Profil imprimante — presse murale UV, têtes Epson I1600.
+#
+# Valeurs tirées du dossier « SAV BetterPrinter I1600 » (§3, instantané de
+# FRIANKOR.xml) et du dossier « RIP UltraPrint » (§7, échantillons de
+# production). Tout ce qui n'est pas établi porte un drapeau à false.
+#
+# ⚠️ Ce fichier décrit UNE machine. Copiez-le par machine plutôt que de
+# l'éditer en place si votre parc en compte plusieurs.
+
+[printer]
+name = "FRIANKOR I1600"
+head = "Epson I1600 (type 260) — 2 têtes, 400 buses/ligne, 4 lignes/tête"
+bits_per_pixel = 2          # 4 tailles de goutte — champ 0x20 du .prn
+max_width_mm = 2000.0       # course X machine (nMaxTripX)
+
+# Ordre des plans dans le fichier .prn.
+#
+# ⚠️ NON VÉRIFIÉ. Le dossier RIP (§12) marque l'affectation plan ↔ encre comme
+# irréductible sans exécution. L'ordre ci-dessous est l'ordre le plus courant
+# sur ce type de machine, pas une observation. Imprimez la mire « channel-id »,
+# relevez l'ordre réel, corrigez ce bloc, puis passez le drapeau à true.
+channel_order_verified = false
+
+notes = """
+Machine : 4 couleurs + blanc, 5 canaux dans les jobs de production UltraPrint.
+Carte 192.168.0.2, BetterPrinterApp v1.0.0.83.
+Les presets 6 et 8 canaux (vernis, encres claires) existent côté UltraPrint mais
+ne sont pas utilisés ici.
+"""
+
+[[channels]]
+name = "C"
+role = "process"
+label = "cyan"
+
+[[channels]]
+name = "M"
+role = "process"
+label = "magenta"
+
+[[channels]]
+name = "Y"
+role = "process"
+label = "jaune"
+
+[[channels]]
+name = "K"
+role = "process"
+label = "noir"
+
+[[channels]]
+name = "W"
+role = "white"
+label = "blanc"
+
+# Champ 0x24 du .prn, relevé sur les 5 fichiers de production.
+# N'ajoutez une entrée qu'après l'avoir observée sur un .prn produit par
+# UltraPrint à cette résolution — une valeur devinée ici décale l'entrelacement.
+[pass_mode_by_dpi_y]
+900 = 0
+1200 = 4
+
+# Échelle des tailles de goutte.
+# ⚠️ NON CALIBRÉE : escalier linéaire supposé. Les vraies valeurs se mesurent
+# avec la mire « drop-wedge » (rip target drop-wedge, puis rip calibrate drops).
+[drop_levels]
+densities = [0.0, 0.3333333, 0.6666667, 1.0]
+calibrated = false
+
+# Limites d'encre. Valeurs de départ prudentes pour de l'UV sur support rigide :
+# à affiner par essais (coulure, polymérisation, adhérence).
+[ink_limits]
+total = 2.6
+
+[ink_limits.per_channel]
+C = 1.0
+M = 1.0
+Y = 1.0
+K = 1.0
+W = 1.0

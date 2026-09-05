@@ -8,6 +8,7 @@ tirage ne l'a pas levé.
 
 from __future__ import annotations
 
+import math
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,7 +98,12 @@ class PrinterProfile:
     drop_levels: DropLevels
     ink_limit_channel: dict[str, float]
     ink_limit_total: float
+    # Machine murale : le chariot balaie une bande de largeur ``max_width_mm``,
+    # la tête monte jusqu'à ``max_height_mm``. La hauteur est un mur infranchissable
+    # — la colonne ne s'allonge pas. La largeur, elle, s'étend en repositionnant
+    # la machine le long du mur : au-delà d'une bande, on découpe en panneaux.
     max_width_mm: float
+    max_height_mm: float = 0.0
     ink_limit_total_all: float | None = None
     channel_order_verified: bool = False
     drop_levels_verified: bool = False
@@ -172,6 +178,12 @@ class PrinterProfile:
     def process_mask(self) -> np.ndarray:
         """Canaux soumis à la limite d'encre totale (TAC)."""
         return self.role_mask(ROLE_PROCESS)
+
+    def panneaux_pour(self, largeur_mm: float) -> int:
+        """Nombre de bandes verticales nécessaires pour couvrir cette largeur."""
+        if self.max_width_mm <= 0:
+            return 1
+        return max(1, math.ceil(largeur_mm / self.max_width_mm - 1e-9))
 
     def limit_for(self, name: str) -> float:
         return self.ink_limit_channel.get(name, 1.0)
@@ -250,6 +262,7 @@ class PrinterProfile:
                     float(limits["total_all"]) if "total_all" in limits else None
                 ),
                 max_width_mm=float(printer.get("max_width_mm", 0.0)),
+                max_height_mm=float(printer.get("max_height_mm", 0.0)),
                 channel_order_verified=bool(
                     printer.get("channel_order_verified", False)
                 ),

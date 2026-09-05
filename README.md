@@ -1,10 +1,10 @@
-# ripcore — RIP pour presses murales UV à têtes Epson I1600
+# ripcore — RIP pour machines d'impression murale UV
 
-Remplace **UltraPrint** dans la chaîne d'impression. Produit des fichiers `.prn`
-que **BetterPrinter** consomme tels quels : la machine, le weave, la plume, le
-nettoyage, les lampes UV et le dongle restent gérés par le logiciel d'origine.
-Nous ne reprenons que la partie où il y a un intérêt métier — couleur, trame,
-limitation d'encre, blanc et vernis.
+RIP maison pour le parc **Symp's / Friankor** à têtes Epson I1600. Remplace
+**UltraPrint** dans la chaîne : produit des fichiers `.prn` que **BetterPrinter**
+consomme tels quels, la machine, le weave, la plume, le nettoyage, les lampes UV
+et le dongle restant gérés par le logiciel d'origine. Nous ne reprenons que la
+partie à valeur métier — couleur, trame, encre, blanc, découpe en panneaux.
 
 ```
 votre fichier → ripcore → .prn → BetterPrinterApp → carte → machine
@@ -14,6 +14,52 @@ Ce périmètre est un choix, pas une limite subie : le canal image de la carte
 (port 8001) n'est pas spécifié par la rétro-ingénierie disponible, et écrire
 soi-même dans les registres moteur d'une machine de 2 m sans banc d'essai n'est
 pas un projet, c'est un accident. Voir [docs/architecture.md](docs/architecture.md).
+
+---
+
+## Une machine murale, pas une table
+
+C'est la contrainte qui structure tout le reste, et elle s'inverse par rapport à
+une machine à plat :
+
+| | Machine à plat | **Machine murale** |
+|---|---|---|
+| Hauteur | libre | **bornée par la colonne** — limite dure |
+| Largeur | bornée par la table | **illimitée**, par repositionnement |
+
+Sur une murale, le chariot balaie une **bande** (2 m sur ce parc) et la colonne
+monte jusqu'à sa course (2 m ici, jusqu'à 3 m sur certains modèles Friankor).
+Une fresque plus haute que la colonne est **impossible** : `ripcore` refuse le
+travail plutôt que de produire un fichier tronqué. Une fresque plus large est
+**découpée en panneaux**, imprimés l'un après l'autre en déplaçant la machine.
+
+La découpe répartit la largeur **également** entre les panneaux plutôt que de
+remplir les premiers à ras bord : un dernier panneau réduit à un ruban de 4 cm
+est difficile à raccorder, et le déséquilibre se voit sur le mur. Le
+recouvrement (10 mm par défaut) absorbe l'imprécision du repositionnement — sans
+lui, la moindre erreur laisse un filet de mur nu au raccord, le défaut le plus
+visible qui soit sur une fresque.
+
+```
+fresque 6 m, bande 2 m, recouvrement 10 mm
+  → 4 panneaux de 1508 mm, la machine est repositionnée 3 fois
+```
+
+**Les formats sont réellement grands.** Mesure sur un panneau de 1,5 m × 0,44 m
+en 720 × 900 dpi : **42 520 × 15 502 px, soit 659 Mpx par encre**, et un `.prn`
+de **0,82 Go**. Toute la chaîne travaille donc en flux — la lecture de la source
+comprise, rééchantillonnée bande par bande via le `box` de Pillow — et la
+hauteur de bande s'adapte à la largeur pour tenir un budget mémoire fixe :
+
+| largeur du panneau | hauteur de bande retenue |
+|---|---|
+| 5 670 px (0,2 m) | 443 lignes |
+| 42 724 px (1,5 m) | 58 lignes |
+| 127 559 px (4,5 m) | 19 lignes |
+
+Résultat mesuré sur le panneau de 1,5 m : **402 Mo de mémoire au pic**, 156 s.
+Charger le raster d'un bloc en aurait demandé une vingtaine de gigaoctets — ce
+que faisait la première version, et que seul un essai à taille réelle a révélé.
 
 ---
 
@@ -43,10 +89,35 @@ permanence :
 
 | Écran | Ce qu'on y fait |
 |---|---|
-| **Imprimer** | Choisir un visuel, sa taille, son rendu ; préparer ; envoyer |
+| **Imprimer** | Le visuel, sa taille sur le mur, le rendu ; préparer ; envoyer |
 | **Tests machine** | Les trois tests de réglage, expliqués et numérotés |
-| **Ma presse** | Ordre des encres, quantité d'encre, largeur maximale |
+| **Ma machine** | Encres, encrage, courses de la machine |
 | **Historique** | Retrouver et renvoyer un travail déjà préparé |
+
+### Simple et Avancé
+
+Sur le principe du « Lite / Pro » des plateformes financières, un sélecteur en
+barre supérieure bascule entre deux densités du même écran :
+
+* **Simple** — le visuel, la taille sur le mur, le blanc dessous. Trois
+  questions, un bouton.
+* **Avancé** — qualité, grain, profil de surface, intention colorimétrique,
+  encre maximale et stratégie de réduction, densité et retrait du blanc,
+  orientation, miroir, recouvrement entre panneaux.
+
+Les réglages avancés **gardent leur valeur** quand on repasse en simple :
+changer de mode ne modifie jamais silencieusement ce qui va s'imprimer. Le mode
+et la palette sont mémorisés d'une session à l'autre.
+
+Le récapitulatif de découpe reste visible **dans les deux modes** : savoir
+qu'une fresque demandera quatre positions de machine change l'organisation du
+chantier, pas seulement le fichier.
+
+### Sombre et clair
+
+Palette sombre par défaut — un poste d'atelier tourne souvent en lumière basse,
+et le fond sombre fait ressortir l'aperçu du visuel, seule chose colorée de
+l'écran. Bascule en un clic dans la barre supérieure.
 
 Trois partis pris :
 
@@ -57,7 +128,8 @@ l'autre et corriger un mot qui ne se dit pas dans le métier, sans toucher au
 code. Un test vérifie qu'aucun jargon ne repasse par la fenêtre.
 
 **Le rouge est réservé aux problèmes.** Bleu pour tout le reste, réussite
-comprise. Un rouge décoratif rendrait le rouge d'alerte invisible.
+comprise. Un rouge décoratif rendrait le rouge d'alerte invisible — et sur une
+machine qui projette de l'encre sur le mur d'un client, l'alerte doit se voir.
 
 **Rien ne fige la fenêtre.** Les travaux tournent dans un fil séparé avec une
 barre d'avancement : un mural de 2 m met plusieurs minutes, et une fenêtre qui

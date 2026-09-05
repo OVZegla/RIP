@@ -1,5 +1,48 @@
 # Architecture et décisions
 
+## La machine est murale — ce que ça change
+
+Le parc est constitué de machines **Symp's** et **Friankor** à têtes Epson
+I1600 : un chariot qui balaie une bande horizontale, une colonne qui monte, et
+la machine que l'on déplace le long du mur entre deux bandes.
+
+La conséquence structurante, et elle est contre-intuitive quand on vient de
+l'impression à plat : **la hauteur est la limite dure, pas la largeur.** La
+colonne ne s'allonge pas. La largeur, elle, n'a pas de limite — elle se paie en
+repositionnements.
+
+Cela se traduit dans le code par deux champs de profil et un module :
+
+* `max_height_mm` — course de la colonne. `panneaux.verifier_hauteur()` refuse
+  tout travail qui la dépasse, plutôt que de produire un fichier tronqué dont
+  le haut manquerait sur le mur.
+* `max_width_mm` — largeur d'une bande. Au-delà, `panneaux.decouper()` répartit
+  la fresque en panneaux **de largeur égale**, avec recouvrement.
+
+La première version de ce dépôt ne connaissait que `max_width_mm` et la
+traitait comme une limite absolue : c'était le modèle d'une machine à plat,
+appliqué à une machine murale. La correction a aussi révélé que le pipeline
+chargeait la source entière en mémoire — invisible sur un format de 20 cm,
+fatal à 4,5 m.
+
+## Les formats muraux imposent le flux
+
+Un panneau de 1,5 m en 720 × 900 dpi fait 42 520 × 15 502 px, soit 659 Mpx par
+encre. Trois conséquences dans le code :
+
+1. **La source est rééchantillonnée bande par bande** (`inputs/source.py`), via
+   le paramètre `box` de Pillow, qui rééchantillonne une région source vers une
+   taille cible sans matérialiser l'image complète. Les bornes de bande sont
+   flottantes : des bornes entières accumuleraient un décalage d'un pixel d'une
+   bande à l'autre, visible comme une ligne à chaque raccord.
+2. **La rotation s'applique à la source**, pas au raster machine : quelques
+   mégapixels au lieu de quelques gigapixels.
+3. **La hauteur de bande s'adapte à la largeur** (`_hauteur_de_bande`), pour
+   tenir un budget mémoire fixe quelle que soit la taille de la fresque.
+
+Mesuré : 402 Mo au pic sur le panneau de 1,5 m, contre une vingtaine de
+gigaoctets avant correction.
+
 ## Où nous nous branchons
 
 Le dossier SAV (§30) décrit deux points d'entrée pour un logiciel tiers :
@@ -51,14 +94,23 @@ ripcore/
 │   ├── inklimit.py     limite par canal + limite totale
 │   └── white.py        sous-couche blanche, vernis, érosion (choke)
 │
-├── inputs/           chargement image, rendu PDF par Ghostscript
+├── inputs/           lecture en flux (bande par bande), rendu PDF Ghostscript
+├── panneaux.py       DÉCOUPE MURALE — largeur illimitée, hauteur bornée
 ├── targets/          mires de calibration
 ├── calibration.py    mesures → échelles et courbes
 ├── blocks.py         statistiques par blocs (l'encre est une grandeur de surface)
 ├── pipeline.py       orchestration d'un job, manifeste
 ├── preview.py        aperçu PNG
+├── profiles_io.py    réécriture d'un profil (sauvegarde .bak, relecture)
 ├── transport/        client RipReceive
-└── cli.py            interface
+├── cli.py            ligne de commande
+└── ui/               interface d'atelier (Tkinter)
+    ├── textes.py       TOUT le vocabulaire affiché, à relire par un imprimeur
+    ├── theme.py        palettes sombre / claire, styles ttk
+    ├── widgets.py      briques dessinées (segments, interrupteurs, cartes)
+    ├── session.py      état et décisions, sans Tk — donc testable
+    ├── worker.py       fil d'arrière-plan, file de messages vers Tk
+    └── ecrans/         Imprimer · Tests machine · Ma machine · Historique
 ```
 
 ## Décisions et leurs raisons
@@ -93,6 +145,23 @@ Chaque valeur non établie est soit un champ de profil avec un drapeau
 d'interpoler entre 900 et 1200. C'est plus pénible et c'est le but : une valeur
 fausse dans l'en-tête décale l'entrelacement sur toute la longueur du job.
 
+### Tk ne se touche que depuis le fil principal
+
+`worker.py` fait tourner les travaux longs dans un fil séparé et communique par
+une file ; l'interface n'est modifiée que dans `_pomper`, côté fil principal.
+
+Cette règle a été enfreinte une fois, dans l'écran d'impression, en lisant une
+variable Tk depuis le fil de travail. Le symptôme (« main thread is not in main
+loop ») n'apparaît qu'au moment où un job casse. Tout ce qui vient de Tk est
+désormais lu **avant** de démarrer le fil, et passé comme valeurs simples.
+
+### Deux niveaux d'interface plutôt que deux applications
+
+Simple et Avancé sont deux densités du **même** écran, pas deux chemins de code :
+les réglages avancés gardent leur valeur quand on repasse en simple, et le job
+produit est identique à réglages égaux. Basculer de mode ne doit jamais changer
+silencieusement ce qui va s'imprimer.
+
 ### Le tramage est sans état par défaut
 
 Sur une machine à passes, un tramage à état propage l'erreur d'une bande à
@@ -120,6 +189,10 @@ impose des bandes contiguës — et le dit si on lui en donne d'autres.
   `spot` (aujourd'hui laissé à zéro plutôt que rempli au hasard).
 - Vernis sélectif à partir d'un calque nommé.
 - Mise en page : imbrication, répétition, marges, repères de coupe.
+- Repères de raccord imprimés en bord de panneau, pour caler la machine à la
+  position suivante sans mesurer.
+- Registres superposés : découper aussi en hauteur quand la fresque dépasse la
+  course de la colonne, avec la reprise de calage que cela suppose.
 - File de tâches et reprise sur incident.
 - Épreuvage écran avec le profil de sortie.
 

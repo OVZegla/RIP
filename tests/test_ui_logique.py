@@ -170,7 +170,7 @@ class TestSession:
         return s
 
     def test_ouvre_le_profil_par_defaut(self):
-        assert Session.ouvrir(PROFIL).profil.name == "FRIANKOR I1600"
+        assert Session.ouvrir(PROFIL).profil.name == "Friankor I1600"
 
     def test_avertissements_en_clair(self, session):
         messages = session.avertissements()
@@ -201,7 +201,7 @@ class TestSession:
     def test_trop_large_refuse_en_clair(self, session, tmp_path):
         source = tmp_path / "grand.png"
         source.write_bytes(b"x")
-        with pytest.raises(RipError, match="plus large que"):
+        with pytest.raises(RipError, match="découpe en panneaux"):
             session.preparer_job(
                 source, largeur_mm=5000, hauteur_mm=None, dpi_x=720, dpi_y=900,
                 grain="bluenoise", rotation=0, miroir=False, support=None,
@@ -219,6 +219,40 @@ class TestSession:
         )
         assert spec.media.white_underbase is False
         assert support.white_underbase is True  # l'original est intact
+
+    def test_trop_haut_refuse_en_clair(self, session, tmp_path):
+        """La hauteur est une limite dure : la colonne ne s'allonge pas."""
+        source = tmp_path / "haut.png"
+        source.write_bytes(b"x")
+        with pytest.raises(RipError, match="la machine monte à"):
+            session.preparer_job(
+                source, largeur_mm=1000, hauteur_mm=9000, dpi_x=720, dpi_y=900,
+                grain="bluenoise", rotation=0, miroir=False, support=None,
+                blanc=False,
+            )
+
+    def test_decoupe_d_une_fresque(self, session):
+        panneaux = session.decouper_fresque(6000, recouvrement_mm=10)
+        assert len(panneaux) == 4
+        assert panneaux[-1].fin_mm == pytest.approx(6000, abs=0.01)
+
+    def test_reglages_avances_transmis(self, session, tmp_path):
+        source = tmp_path / "v.png"
+        source.write_bytes(b"x")
+        spec = session.preparer_job(
+            source, largeur_mm=1000, hauteur_mm=None, dpi_x=720, dpi_y=1200,
+            grain="errdiff", rotation=90, miroir=True, support=None, blanc=True,
+            intention="relative", strategie_encre="preserve-black",
+            encre_totale=2.2, densite_blanc=0.8, retrait_blanc=4,
+            suffixe="-p2",
+        )
+        assert spec.halftone == "errdiff"
+        assert spec.ink_limit_strategy == "preserve-black"
+        assert spec.media.rendering_intent == "relative"
+        assert spec.media.ink_limit_total == pytest.approx(2.2)
+        assert spec.media.white_density == pytest.approx(0.8)
+        assert spec.media.white_choke_px == 4
+        assert spec.output.name == "v-p2.prn"
 
     def test_historique_vide_au_depart(self, session):
         assert session.historique() == []

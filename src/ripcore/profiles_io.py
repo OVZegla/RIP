@@ -44,7 +44,10 @@ def render_profile(profile: PrinterProfile) -> str:
         f'head = "{profile.head}"',
         f"bits_per_pixel = {profile.bits_per_pixel}"
         "          # tailles de goutte = 2^bits",
-        f"max_width_mm = {_fmt(profile.max_width_mm)}",
+        f"max_width_mm = {_fmt(profile.max_width_mm)}"
+        "     # largeur d'une bande balayée par le chariot",
+        f"max_height_mm = {_fmt(profile.max_height_mm)}"
+        "    # course de la colonne — limite infranchissable",
         "",
         "# Ordre des plans dans le fichier machine, du premier au dernier.",
         "# Se relève avec le « test des couleurs » (mire channel-id).",
@@ -158,6 +161,7 @@ def reorder_channels(profile: PrinterProfile, order: list[str]) -> PrinterProfil
         ink_limit_channel=dict(profile.ink_limit_channel),
         ink_limit_total=profile.ink_limit_total,
         max_width_mm=profile.max_width_mm,
+        max_height_mm=profile.max_height_mm,
         ink_limit_total_all=profile.ink_limit_total_all,
         channel_order_verified=True,  # l'ordre vient d'un tirage : il est vérifié
         drop_levels_verified=profile.drop_levels_verified,

@@ -23,29 +23,31 @@ from ...profiles_io import reorder_channels, save_profile
 from ...targets import channel_id, drop_wedge, lin_wedge
 from .. import textes, theme
 from ..session import ouvrir_dossier
-from ..widgets import BoutonGeant, Carte, cadre_defilant
+from ..widgets import BoutonAction, Carte, cadre_defilant
 
 
-class EcranTests(ttk.Frame):
+class EcranTests(tk.Frame):
     def __init__(self, parent: tk.Misc, app) -> None:
-        super().__init__(parent, style="TFrame")
+        p = theme.courante()
+        super().__init__(parent, bg=p.fond)
         self.app = app
         self.session = app.session
         self.polices = app.polices
-        self._etats: dict[str, ttk.Label] = {}
+        self._etats: dict[str, tk.Label] = {}
         self._construire()
         self.rafraichir()
 
     def _construire(self) -> None:
-        entete = ttk.Frame(self, style="TFrame", padding=(28, 24, 28, 4))
+        p = theme.courante()
+        entete = tk.Frame(self, bg=p.fond, padx=28, pady=22)
         entete.pack(fill="x")
-        ttk.Label(entete, text=textes.TESTS_TITRE, style="Titre.TLabel").pack(anchor="w")
-        ttk.Label(
-            entete, text=textes.TESTS_INTRO, style="SousTitre.TLabel",
-            wraplength=780, justify="left",
-        ).pack(anchor="w", pady=(6, 0))
+        tk.Label(entete, text=textes.TESTS_TITRE, bg=p.fond, fg=p.texte,
+                 font=self.polices.titre, anchor="w").pack(anchor="w")
+        tk.Label(entete, text=textes.TESTS_INTRO, bg=p.fond, fg=p.texte_doux,
+                 font=self.polices.petit, wraplength=820, justify="left",
+                 anchor="w").pack(anchor="w", pady=(6, 0))
 
-        hote = ttk.Frame(self, style="TFrame", padding=(28, 12, 28, 20))
+        hote = tk.Frame(self, bg=p.fond, padx=28, pady=8)
         hote.pack(fill="both", expand=True)
         _, corps = cadre_defilant(hote)
 
@@ -53,43 +55,50 @@ class EcranTests(ttk.Frame):
             self._carte_test(corps, test)
 
     def _carte_test(self, parent: tk.Misc, test: dict) -> None:
-        carte = Carte(parent)
-        carte.pack(fill="x", pady=(0, 16))
+        p = theme.courante()
+        carte = Carte(parent, polices=self.polices)
+        carte.pack(fill="x", pady=(0, 14))
+        corps = carte.corps()
 
-        haut = ttk.Frame(carte, style="Carte.TFrame")
+        haut = tk.Frame(corps, bg=p.surface)
         haut.pack(fill="x")
 
-        pastille = tk.Label(
-            haut, text=test["numero"], bg=theme.BLEU, fg=theme.BLANC,
-            font=self.polices.chiffre, width=2,
-        )
-        pastille.pack(side="left", padx=(0, 18), ipady=6)
+        tk.Label(haut, text=test["numero"], bg=p.accent, fg=p.accent_texte,
+                 font=self.polices.chiffre_grand, width=2,
+                 ).pack(side="left", padx=(0, 18), ipady=8)
 
-        titres = ttk.Frame(haut, style="Carte.TFrame")
+        titres = tk.Frame(haut, bg=p.surface)
         titres.pack(side="left", fill="x", expand=True)
-        ttk.Label(titres, text=test["titre"], style="Section.TLabel").pack(anchor="w")
-        ttk.Label(titres, text=test["resume"], style="Doux.TLabel").pack(anchor="w")
+        tk.Label(titres, text=test["titre"], bg=p.surface, fg=p.texte,
+                 font=self.polices.section, anchor="w").pack(anchor="w")
+        tk.Label(titres, text=test["resume"], bg=p.surface, fg=p.texte_doux,
+                 font=self.polices.petit, anchor="w").pack(anchor="w")
 
-        etat = ttk.Label(haut, text="", style="Doux.TLabel")
-        etat.pack(side="right", anchor="n")
+        etat = tk.Label(haut, text="", bg=p.surface, fg=p.texte_doux,
+                        font=self.polices.etiquette)
+        etat.pack(side="right", anchor="n", pady=4)
         self._etats[test["cle"]] = etat
 
-        ttk.Label(
-            carte, text=test["detail"], style="Carte.TLabel",
-            wraplength=700, justify="left",
-        ).pack(anchor="w", pady=(14, 8))
-        ttk.Label(
-            carte, text="⏱  " + test["duree"], style="Doux.TLabel"
-        ).pack(anchor="w", pady=(0, 14))
+        self._detail = tk.Label(
+            corps, text=test["detail"], bg=p.surface, fg=p.texte_doux,
+            font=self.polices.petit, wraplength=740, justify="left", anchor="w",
+        )
+        self._detail.pack(anchor="w", pady=(16, 8))
+        carte._detail = self._detail  # type: ignore[attr-defined]
 
-        boutons = ttk.Frame(carte, style="Carte.TFrame")
+        tk.Label(corps, text=test["duree"], bg=p.surface, fg=p.texte_faible,
+                 font=self.polices.minuscule, anchor="w").pack(anchor="w",
+                                                               pady=(0, 16))
+
+        boutons = tk.Frame(corps, bg=p.surface)
         boutons.pack(fill="x")
-        BoutonGeant(
-            boutons, test["bouton"], lambda t=test: self._creer(t), self.polices,
-        ).pack(side="left")
-        ttk.Button(
-            boutons, text=test["saisie"], command=lambda t=test: self._saisir(t),
-        ).pack(side="left", padx=(12, 0))
+        bouton = BoutonAction(boutons, test["bouton"],
+                              lambda t=test: self._creer(t), self.polices)
+        bouton.configure(width=self.polices.bouton.measure(test["bouton"]) + 48)
+        bouton.pack(side="left")
+        ttk.Button(boutons, text=test["saisie"],
+                   command=lambda t=test: self._saisir(t)).pack(side="left",
+                                                                padx=(12, 0))
 
     # -- création des mires ---------------------------------------------------
 
@@ -194,7 +203,11 @@ class EcranTests(ttk.Frame):
 
     # -- état -----------------------------------------------------------------
 
+    def mode_change(self) -> None:
+        """En mode simple, le détail des tests reste replié à l'essentiel."""
+
     def rafraichir(self) -> None:
+        p = theme.courante()
         profil = self.session.profil
         faits = {
             "channel-id": profil.channel_order_verified,
@@ -204,11 +217,11 @@ class EcranTests(ttk.Frame):
         for cle, etat in self._etats.items():
             fait = faits.get(cle)
             if fait is True:
-                etat.configure(text="✓  Fait", foreground=theme.BLEU)
+                etat.configure(text="FAIT", fg=p.accent)
             elif fait is False:
-                etat.configure(text="À faire", foreground=theme.ROUGE)
+                etat.configure(text="À FAIRE", fg=p.danger)
             else:
-                etat.configure(text="", foreground=theme.TEXTE_DOUX)
+                etat.configure(text="", fg=p.texte_doux)
 
 
 class DialogueCouleurs(tk.Toplevel):
@@ -220,42 +233,45 @@ class DialogueCouleurs(tk.Toplevel):
         self.session = app.session
         profil = self.session.profil
 
+        p = theme.courante()
         self.title(textes.SAISIE_COULEURS_TITRE)
-        self.configure(bg=theme.FOND)
+        self.configure(bg=p.fond)
         self.transient(parent.winfo_toplevel())
         self.grab_set()
         self.resizable(False, False)
 
-        cadre = ttk.Frame(self, style="TFrame", padding=24)
+        cadre = tk.Frame(self, bg=p.fond, padx=26, pady=26)
         cadre.pack(fill="both", expand=True)
 
-        ttk.Label(
-            cadre, text=textes.SAISIE_COULEURS_TITRE, style="Titre.TLabel"
-        ).pack(anchor="w")
-        ttk.Label(
-            cadre, text=textes.SAISIE_COULEURS_AIDE, style="SousTitre.TLabel",
-            wraplength=520, justify="left",
-        ).pack(anchor="w", pady=(8, 20))
+        tk.Label(cadre, text=textes.SAISIE_COULEURS_TITRE, bg=p.fond, fg=p.texte,
+                 font=app.polices.titre, anchor="w").pack(anchor="w")
+        tk.Label(cadre, text=textes.SAISIE_COULEURS_AIDE, bg=p.fond,
+                 fg=p.texte_doux, font=app.polices.petit, wraplength=520,
+                 justify="left", anchor="w").pack(anchor="w", pady=(8, 22))
 
         self.choix: list[tk.StringVar] = []
         noms = [textes.nom_encre(c) for c in profil.channel_names]
         self._codes = {textes.nom_encre(c): c for c in profil.channel_names}
 
-        grille = ttk.Frame(cadre, style="TFrame")
+        grille = tk.Frame(cadre, bg=p.fond)
         grille.pack(fill="x")
         for i, code in enumerate(profil.channel_names):
-            ligne = ttk.Frame(grille, style="TFrame")
-            ligne.pack(fill="x", pady=5)
+            ligne = tk.Frame(grille, bg=p.fond)
+            ligne.pack(fill="x", pady=6)
 
-            carres = "■ " * (i + 1)
-            ttk.Label(
+            tk.Label(
                 ligne,
                 text=textes.SAISIE_COULEURS_BARRE.format(n=i + 1, s="s" if i else ""),
-                style="TLabel", width=18,
+                bg=p.fond, fg=p.texte, font=app.polices.corps, width=18,
+                anchor="w",
             ).pack(side="left")
-            ttk.Label(ligne, text=carres, style="DouxFond.TLabel", width=12).pack(
-                side="left"
-            )
+            reperes = tk.Frame(ligne, bg=p.fond, width=110)
+            reperes.pack(side="left")
+            reperes.pack_propagate(False)
+            for _ in range(i + 1):
+                tk.Frame(reperes, bg=p.texte_doux, width=11, height=11).pack(
+                    side="left", padx=2, pady=6
+                )
 
             var = tk.StringVar(value=textes.nom_encre(code))
             self.choix.append(var)
@@ -263,12 +279,12 @@ class DialogueCouleurs(tk.Toplevel):
                 ligne, textvariable=var, values=noms, state="readonly", width=20
             ).pack(side="left", padx=(10, 0))
 
-        boutons = ttk.Frame(cadre, style="TFrame")
-        boutons.pack(fill="x", pady=(24, 0))
+        boutons = tk.Frame(cadre, bg=p.fond)
+        boutons.pack(fill="x", pady=(26, 0))
         ttk.Button(boutons, text="Annuler", command=self.destroy).pack(side="right")
         ttk.Button(
             boutons, text=textes.SAISIE_COULEURS_VALIDER,
-            command=self._valider, style="Primaire.TButton",
+            command=self._valider, style="Accent.TButton",
         ).pack(side="right", padx=(0, 10))
 
         self.update_idletasks()
@@ -292,7 +308,7 @@ class DialogueCouleurs(tk.Toplevel):
         self.app.profil_modifie()
         self.destroy()
         messagebox.showinfo(
-            "Presse identifiée",
+            "Machine identifiée",
             "L'ordre des encres est enregistré :\n\n"
             + "\n".join(
                 f"  {i + 1}. {textes.nom_encre(c)}" for i, c in enumerate(ordre)

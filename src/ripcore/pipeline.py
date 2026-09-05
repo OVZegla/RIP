@@ -29,7 +29,13 @@ from .color.inklimit import SCALE_ALL, limit_per_channel, limit_total
 from .color.white import underbase, varnish
 from .errors import RipError
 from .halftone.engines import Halftoner, make_halftoner
-from .inputs.source import MM_PER_INCH, SourceImage, fit_geometry, load_source
+from .inputs.source import (
+    MM_PER_INCH,
+    SourceImage,
+    fit_geometry,
+    load_source,
+    mesurer,
+)
 from .prnfile.writer import PrnWriter
 from .profiles import (
     ROLE_PROCESS,
@@ -40,6 +46,11 @@ from .profiles import (
 )
 
 DEFAULT_BAND_LINES = 512
+# Mémoire visée par bande. Une fresque murale fait plusieurs dizaines de milliers
+# de pixels de large : une hauteur de bande fixe ferait exploser la mémoire sur
+# les grands formats et la gaspillerait sur les petits.
+BUDGET_BANDE_OCTETS = 96 << 20
+MIN_BAND_LINES = 16
 _ICC_MODE_BY_SOURCE = {"RGB": "RGB", "CMYK": "CMYK", "L": "L"}
 _CMYK_ORDER = ("C", "M", "Y", "K")
 
@@ -96,27 +107,6 @@ class JobResult:
             f"  encre : {cov}\n"
             f"  {self.seconds:.1f} s"
         )
-
-
-def _orient(img: SourceImage, rotate: int, mirror: bool) -> SourceImage:
-    """Rotation / miroir, appliqués une fois pour toutes avant le traitement."""
-    data, alpha = img.data, img.alpha
-    if rotate:
-        k = {90: 3, 180: 2, 270: 1}[rotate]  # np.rot90 tourne dans le sens direct
-        data = np.rot90(data, k=k, axes=(1, 2))
-        if alpha is not None:
-            alpha = np.rot90(alpha, k=k, axes=(0, 1))
-    if mirror:
-        data = data[:, :, ::-1]
-        if alpha is not None:
-            alpha = alpha[:, ::-1]
-    return SourceImage(
-        data=np.ascontiguousarray(data),
-        mode=img.mode,
-        alpha=None if alpha is None else np.ascontiguousarray(alpha),
-        source=img.source,
-        embedded_icc=img.embedded_icc,
-    )
 
 
 def _build_color_transform(
@@ -201,16 +191,7 @@ def run_job(
     pass_mode = profile.pass_mode(spec.dpi_y)  # lève tôt si la résolution est inconnue
 
     # -- géométrie -----------------------------------------------------------
-    from PIL import Image  # noqa: PLC0415 — import tardif : Pillow est optionnel
-
-    with Image.open(spec.source) as probe_img:
-        src_w, src_h = probe_img.size
-        dpi_info = probe_img.info.get("dpi")
-    src_dpi_x = float(dpi_info[0]) if dpi_info else None
-    src_dpi_y = float(dpi_info[1]) if dpi_info else None
-    if spec.rotate in (90, 270):
-        src_w, src_h = src_h, src_w
-        src_dpi_x, src_dpi_y = src_dpi_y, src_dpi_x
+    src_w, src_h, src_dpi_x, src_dpi_y = mesurer(spec.source, spec.rotate)
 
     width_px, height_px, width_mm, height_mm = fit_geometry(
         src_w,
@@ -229,20 +210,10 @@ def run_job(
         )
 
     # -- chargement ----------------------------------------------------------
-    load_w, load_h = (
-        (height_px, width_px) if spec.rotate in (90, 270) else (width_px, height_px)
+    img = load_source(
+        spec.source, width_px=width_px, height_px=height_px,
+        resample=spec.resample, rotate=spec.rotate, mirror=spec.mirror,
     )
-    img = _orient(
-        load_source(spec.source, width_px=load_w, height_px=load_h,
-                    resample=spec.resample),
-        spec.rotate,
-        spec.mirror,
-    )
-    if img.data.shape[1:] != (height_px, width_px):
-        raise RipError(
-            f"géométrie incohérente après orientation : "
-            f"{img.data.shape[1:]}, ({height_px}, {width_px}) attendu"
-        )
 
     separate, icc_label = _build_color_transform(spec, img)
     if icc_label.startswith("SÉPARATION NAÏVE"):
@@ -291,6 +262,7 @@ def run_job(
     ht.reset()
 
     # -- traitement par bandes ----------------------------------------------
+    band_lines = _hauteur_de_bande(spec.band_lines, width_px, profile.n_channels)
     spec.output.parent.mkdir(parents=True, exist_ok=True)
     with PrnWriter(
         spec.output,
@@ -301,10 +273,9 @@ def run_job(
         bits_per_pixel=profile.bits_per_pixel,
         pass_mode=pass_mode,
     ) as writer:
-        for y0 in range(0, height_px, spec.band_lines):
-            y1 = min(y0 + spec.band_lines, height_px)
-            band = img.data[:, y0:y1]
-            alpha = img.alpha[y0:y1] if img.alpha is not None else None
+        for y0 in range(0, height_px, band_lines):
+            y1 = min(y0 + band_lines, height_px)
+            band, alpha = img.band(y0, y1)
 
             cmyk = separate(band)
             ink = _assemble(profile, cmyk, media, alpha)
@@ -322,6 +293,7 @@ def run_job(
             writer.write_block(ht.process(ink, y0))
             if progress is not None:
                 progress(y1, height_px)
+    img.close()
 
     header = writer.header
     coverage = dict(
@@ -346,6 +318,18 @@ def run_job(
     )
     result.manifest = write_manifest(spec, result, header)
     return result
+
+
+def _hauteur_de_bande(demande: int, width_px: int, channels: int) -> int:
+    """Hauteur de bande tenant dans le budget mémoire, pour cette largeur.
+
+    Les tableaux vivants pendant une bande sont de l'ordre de deux fois
+    (canaux × largeur × hauteur) en float32 : entrée séparée, encre assemblée,
+    plus les intermédiaires du tramage.
+    """
+    par_ligne = max(1, width_px * max(channels, 4) * 4 * 2)
+    plafond = max(MIN_BAND_LINES, BUDGET_BANDE_OCTETS // par_ligne)
+    return max(MIN_BAND_LINES, min(demande, plafond))
 
 
 def write_manifest(spec: JobSpec, result: JobResult, header) -> Path:

@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..errors import ProfileError, RipError
+from ..panneaux import Panneau, decouper, verifier_hauteur
 from ..pipeline import JobSpec
 from ..profiles import MediaProfile, PrinterProfile
 from . import textes
@@ -136,13 +137,21 @@ class Session:
         miroir: bool,
         support: MediaProfile | None,
         blanc: bool,
+        intention: str | None = None,
+        strategie_encre: str = "scale-all",
+        encre_totale: float | None = None,
+        densite_blanc: float | None = None,
+        retrait_blanc: int | None = None,
+        suffixe: str = "",
     ) -> JobSpec:
         """Choix d'écran → JobSpec, avec les vérifications à faire tôt."""
         source = Path(source)
         if not source.is_file():
             raise RipError(textes.ERREUR_FICHIER_INTROUVABLE)
+        if hauteur_mm is not None:
+            verifier_hauteur(hauteur_mm, self.profil.max_height_mm)
         if largeur_mm is not None and self.profil.max_width_mm:
-            if largeur_mm > self.profil.max_width_mm:
+            if largeur_mm > self.profil.max_width_mm + 1e-6:
                 raise RipError(
                     textes.ERREUR_TROP_LARGE.format(
                         demande=largeur_mm, max=self.profil.max_width_mm
@@ -150,28 +159,33 @@ class Session:
                 )
 
         media = support or MediaProfile(name="Sans profil de support")
-        # Le blanc est une décision d'écran : on ne modifie pas le fichier de
-        # support pour autant, on en dérive une copie.
-        if media.white_underbase != blanc:
-            media = MediaProfile(
-                name=media.name,
-                icc_output=media.icc_output,
-                icc_input_rgb=media.icc_input_rgb,
-                icc_input_cmyk=media.icc_input_cmyk,
-                rendering_intent=media.rendering_intent,
-                linearization=media.linearization,
-                ink_limit_total=media.ink_limit_total,
-                white_underbase=blanc,
-                white_density=media.white_density,
-                white_choke_px=media.white_choke_px,
-                notes=media.notes,
-                source=media.source,
-            )
+        # Les réglages d'écran ne modifient jamais le fichier de support :
+        # on en dérive une copie le temps du travail.
+        media = MediaProfile(
+            name=media.name,
+            icc_output=media.icc_output,
+            icc_input_rgb=media.icc_input_rgb,
+            icc_input_cmyk=media.icc_input_cmyk,
+            rendering_intent=intention or media.rendering_intent,
+            linearization=media.linearization,
+            ink_limit_total=(
+                encre_totale if encre_totale is not None else media.ink_limit_total
+            ),
+            white_underbase=blanc,
+            white_density=(
+                densite_blanc if densite_blanc is not None else media.white_density
+            ),
+            white_choke_px=(
+                retrait_blanc if retrait_blanc is not None else media.white_choke_px
+            ),
+            notes=media.notes,
+            source=media.source,
+        )
 
         self.dossier_sortie.mkdir(parents=True, exist_ok=True)
         return JobSpec(
             source=source,
-            output=self.dossier_sortie / f"{source.stem}.prn",
+            output=self.dossier_sortie / f"{source.stem}{suffixe}.prn",
             printer=self.profil,
             media=media,
             dpi_x=dpi_x,
@@ -181,7 +195,46 @@ class Session:
             halftone=grain,
             rotate=rotation,
             mirror=miroir,
+            ink_limit_strategy=strategie_encre,
         )
+
+    # -- découpe en panneaux --------------------------------------------------
+
+    def decouper_fresque(
+        self, largeur_mm: float, recouvrement_mm: float = 0.0
+    ) -> list[Panneau]:
+        """Panneaux nécessaires pour couvrir cette largeur sur cette machine."""
+        return decouper(largeur_mm, self.profil.max_width_mm or largeur_mm,
+                        recouvrement_mm)
+
+    def extraire_panneau(
+        self, source: Path, panneau: Panneau, largeur_totale_mm: float,
+        dossier: Path | None = None,
+    ) -> Path:
+        """Découpe l'image source sur la largeur d'un panneau.
+
+        On travaille sur des copies : le visuel d'origine du client n'est jamais
+        modifié, et chaque panneau reste un fichier qu'on peut rouvrir et
+        vérifier après coup.
+        """
+        from PIL import Image  # noqa: PLC0415
+
+        source = Path(source)
+        dossier = Path(dossier) if dossier else self.dossier_sortie / "panneaux"
+        dossier.mkdir(parents=True, exist_ok=True)
+        cible = dossier / f"{source.stem}-p{panneau.numero}{source.suffix}"
+
+        Image.MAX_IMAGE_PIXELS = None
+        with Image.open(source) as im:
+            im.load()
+            largeur_px = im.width
+            x0 = round(panneau.debut_mm / largeur_totale_mm * largeur_px)
+            x1 = round(panneau.fin_mm / largeur_totale_mm * largeur_px)
+            x0 = max(0, min(x0, largeur_px - 1))
+            x1 = max(x0 + 1, min(x1, largeur_px))
+            decoupe = im.crop((x0, 0, x1, im.height))
+            decoupe.save(cible)
+        return cible
 
     # -- historique ----------------------------------------------------------
 

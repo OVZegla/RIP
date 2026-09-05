@@ -8,10 +8,19 @@
 # l'éditer en place si votre parc en compte plusieurs.
 
 [printer]
-name = "FRIANKOR I1600"
+name = "Friankor I1600"
 head = "Epson I1600 (type 260) — 2 têtes, 400 buses/ligne, 4 lignes/tête"
+kind = "murale"             # murale | sol | mixte
 bits_per_pixel = 2          # 4 tailles de goutte — champ 0x20 du .prn
-max_width_mm = 2000.0       # course X machine (nMaxTripX)
+# Machine murale : le chariot balaie une bande, la colonne monte.
+max_width_mm = 2000.0       # largeur d'une bande (course X, nMaxTripX)
+max_height_mm = 2000.0      # course de la colonne (nMaxTripY) — LIMITE DURE
+#
+# La hauteur ne se contourne pas : au-delà, la tête ne monte plus.
+# La largeur, elle, s'étend en déplaçant la machine le long du mur ;
+# le logiciel découpe alors la fresque en panneaux d'une bande chacun.
+# Friankor annonce jusqu'à 3 m de hauteur sur ses modèles : relevez la
+# course réelle de VOTRE colonne avant de monter cette valeur.
 
 # Ordre des plans dans le fichier .prn.
 #

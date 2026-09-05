@@ -1,16 +1,28 @@
 """Chargement des images source et mise à l'échelle vers la grille machine.
 
-Point sensible : la grille de sortie n'est **pas carrée** (720 × 900 ou
-720 × 1200 dpi). Une image redimensionnée avec le même facteur en X et en Y
-sort déformée. Le rééchantillonnage se fait donc toujours vers les dimensions
-en *pixels machine* calculées séparément sur chaque axe.
+Deux points décident du bon fonctionnement sur des formats muraux.
+
+**La grille n'est pas carrée** (720 × 900 ou 720 × 1200 dpi). Une image
+redimensionnée avec le même facteur en X et en Y sort déformée : le
+rééchantillonnage vise toujours les dimensions en *pixels machine* calculées
+séparément sur chaque axe.
+
+**Rien n'est chargé en entier.** Une fresque de 4,5 m en 720 × 900 dpi fait
+127 000 pixels de large : la rééchantillonner d'un bloc demanderait des dizaines
+de gigaoctets. L'image est donc rééchantillonnée **bande par bande**, à la
+demande, via le paramètre ``box`` de Pillow — qui rééchantillonne une région
+source vers une taille cible sans matérialiser l'image complète.
+
+La rotation, elle, s'applique une fois à la source (quelques mégapixels), pas au
+raster machine (quelques gigapixels).
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -23,39 +35,20 @@ RASTER_SUFFIXES = frozenset(
 )
 PDF_SUFFIXES = frozenset({".pdf", ".ps", ".eps", ".ai"})
 
+_MODES_SUPPORTES = ("RGB", "CMYK", "L")
 
-def _require_pillow():
+
+def _pillow():
     try:
         from PIL import Image  # noqa: PLC0415
     except ImportError:  # pragma: no cover
         raise RipError(
             "la lecture d'images requiert Pillow : pip install 'ripcore[images]'"
         ) from None
-    Image.MAX_IMAGE_PIXELS = None  # gros formats : la garde anti-bombe gêne ici
+    # La garde anti-« bombe de décompression » de Pillow gêne ici : les formats
+    # muraux dépassent légitimement ses seuils.
+    Image.MAX_IMAGE_PIXELS = None
     return Image
-
-
-@dataclass(frozen=True, slots=True)
-class SourceImage:
-    """Image source normalisée, prête pour la séparation.
-
-    ``data`` est en (C, H, W) float32 dans [0, 1], à la résolution machine.
-    ``mode`` vaut ``RGB``, ``CMYK`` ou ``L``.
-    """
-
-    data: np.ndarray
-    mode: str
-    alpha: np.ndarray | None = None
-    source: Path | None = None
-    embedded_icc: bytes | None = None
-
-    @property
-    def height(self) -> int:
-        return self.data.shape[1]
-
-    @property
-    def width(self) -> int:
-        return self.data.shape[2]
 
 
 def pixels_for(size_mm: float, dpi: int) -> int:
@@ -65,15 +58,103 @@ def pixels_for(size_mm: float, dpi: int) -> int:
     return max(1, math.ceil(size_mm / MM_PER_INCH * dpi))
 
 
+@dataclass(slots=True)
+class SourceImage:
+    """Image source, rééchantillonnée à la demande vers la grille machine.
+
+    ``band(y0, y1)`` rend un bloc (C, h, W) float32 dans [0, 1] à la résolution
+    machine. L'objet garde l'image ouverte : refermez-le avec ``close()`` ou
+    utilisez-le comme gestionnaire de contexte.
+    """
+
+    width_px: int
+    height_px: int
+    mode: str
+    source: Path | None = None
+    embedded_icc: bytes | None = None
+    _image: Any = field(default=None, repr=False)
+    _alpha: Any = field(default=None, repr=False)
+    _filtre: Any = field(default=None, repr=False)
+
+    @property
+    def channels(self) -> int:
+        return {"RGB": 3, "CMYK": 4, "L": 1}[self.mode]
+
+    @property
+    def has_alpha(self) -> bool:
+        return self._alpha is not None
+
+    def band(self, y0: int, y1: int) -> tuple[np.ndarray, np.ndarray | None]:
+        """Bande [y0, y1) de la sortie → (données (C, h, W), alpha (h, W) | None)."""
+        if not 0 <= y0 < y1 <= self.height_px:
+            raise RipError(
+                f"bande [{y0}, {y1}) hors de l'image ({self.height_px} lignes)"
+            )
+        boite = self._boite_source(y0, y1)
+        cible = (self.width_px, y1 - y0)
+
+        bloc = self._image.resize(cible, self._filtre, box=boite)
+        données = np.asarray(bloc, dtype=np.uint8)
+        if données.ndim == 2:
+            données = données[:, :, None]
+        données = np.ascontiguousarray(
+            données.transpose(2, 0, 1)
+        ).astype(np.float32) / 255.0
+
+        alpha = None
+        if self._alpha is not None:
+            canal = self._alpha.resize(cible, self._filtre, box=boite)
+            alpha = np.asarray(canal, dtype=np.float32) / 255.0
+        return données, alpha
+
+    def _boite_source(self, y0: int, y1: int) -> tuple[float, float, float, float]:
+        """Région source correspondant à une bande de sortie, en coordonnées réelles.
+
+        Des bornes flottantes évitent l'accumulation d'un décalage d'un pixel
+        d'une bande à l'autre, qui se verrait comme une ligne à chaque raccord.
+        """
+        hauteur_source = self._image.height
+        echelle = hauteur_source / self.height_px
+        return (0.0, y0 * echelle, float(self._image.width), y1 * echelle)
+
+    def close(self) -> None:
+        for image in (self._image, self._alpha):
+            if image is not None:
+                image.close()
+        self._image = None
+        self._alpha = None
+
+    def __enter__(self) -> SourceImage:
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
+
+
+FILTRES = {
+    "lanczos": "LANCZOS",
+    "bicubic": "BICUBIC",
+    "bilinear": "BILINEAR",
+    "nearest": "NEAREST",
+}
+
+
 def load_source(
     path: str | Path,
     *,
     width_px: int,
     height_px: int,
     resample: str = "lanczos",
+    rotate: int = 0,
+    mirror: bool = False,
 ) -> SourceImage:
-    """Charge et met à l'échelle une image matricielle vers la grille machine."""
-    Image = _require_pillow()
+    """Ouvre une image et prépare son rééchantillonnage vers la grille machine.
+
+    La rotation et le miroir sont appliqués ici, **à la résolution source** :
+    quelques mégapixels, contre plusieurs gigapixels une fois à la résolution
+    machine.
+    """
+    Image = _pillow()
     p = Path(path)
     if p.suffix.lower() not in RASTER_SUFFIXES:
         raise RipError(
@@ -81,56 +162,65 @@ def load_source(
             f"({', '.join(sorted(RASTER_SUFFIXES))}). Pour un PDF/PS, passez par "
             f"ripcore.inputs.pdf.render_pdf()."
         )
-
-    filters = {
-        "lanczos": Image.Resampling.LANCZOS,
-        "bicubic": Image.Resampling.BICUBIC,
-        "bilinear": Image.Resampling.BILINEAR,
-        "nearest": Image.Resampling.NEAREST,
-    }
-    if resample not in filters:
+    if resample not in FILTRES:
         raise RipError(
             f"filtre de rééchantillonnage inconnu : {resample!r} "
-            f"({' | '.join(filters)})"
+            f"({' | '.join(FILTRES)})"
         )
+    if rotate not in (0, 90, 180, 270):
+        raise RipError(f"rotation {rotate}° non supportée (0, 90, 180, 270)")
 
-    with Image.open(p) as im:
-        im.load()
-        icc = im.info.get("icc_profile")
-        alpha_img = None
-        if im.mode in ("RGBA", "LA") or "transparency" in im.info:
-            rgba = im.convert("RGBA")
-            alpha_img = rgba.getchannel("A")
-            im = rgba.convert("RGB")
-        elif im.mode not in ("RGB", "CMYK", "L"):
-            im = im.convert("RGB")
+    filtre = getattr(Image.Resampling, FILTRES[resample])
+    image = Image.open(p)
+    image.load()
+    icc = image.info.get("icc_profile")
 
-        mode = im.mode
-        if (im.width, im.height) != (width_px, height_px):
-            im = im.resize((width_px, height_px), filters[resample])
-            if alpha_img is not None:
-                alpha_img = alpha_img.resize((width_px, height_px), filters[resample])
+    alpha = None
+    if image.mode in ("RGBA", "LA") or "transparency" in image.info:
+        rgba = image.convert("RGBA")
+        alpha = rgba.getchannel("A")
+        image = rgba.convert("RGB")
+    elif image.mode not in _MODES_SUPPORTES:
+        image = image.convert("RGB")
 
-        arr = np.asarray(im, dtype=np.uint8)
-        alpha = (
-            np.asarray(alpha_img, dtype=np.float32) / 255.0
-            if alpha_img is not None
-            else None
-        )
-
-    if arr.ndim == 2:
-        arr = arr[:, :, None]
-    data = np.ascontiguousarray(arr.transpose(2, 0, 1)).astype(np.float32) / 255.0
-
-    if mode == "CMYK":
-        # Pillow stocke le CMJN des TIFF/JPEG Adobe en valeurs inversées selon
-        # les cas ; on ne devine pas. Un TIFF CMJN produit par un flux
-        # prépresse standard arrive ici en « 0 = pas d'encre ».
-        pass
+    if rotate:
+        transposition = {
+            90: Image.Transpose.ROTATE_270,   # sens horaire
+            180: Image.Transpose.ROTATE_180,
+            270: Image.Transpose.ROTATE_90,
+        }[rotate]
+        image = image.transpose(transposition)
+        if alpha is not None:
+            alpha = alpha.transpose(transposition)
+    if mirror:
+        image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        if alpha is not None:
+            alpha = alpha.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
 
     return SourceImage(
-        data=data, mode=mode, alpha=alpha, source=p, embedded_icc=icc
+        width_px=width_px,
+        height_px=height_px,
+        mode=image.mode,
+        source=p,
+        embedded_icc=icc,
+        _image=image,
+        _alpha=alpha,
+        _filtre=filtre,
     )
+
+
+def mesurer(path: str | Path, rotate: int = 0) -> tuple[int, int, float | None, float | None]:
+    """(largeur, hauteur, dpi_x, dpi_y) de la source, rotation prise en compte."""
+    Image = _pillow()
+    with Image.open(path) as image:
+        largeur, hauteur = image.size
+        dpi = image.info.get("dpi")
+    dpi_x = float(dpi[0]) if dpi else None
+    dpi_y = float(dpi[1]) if dpi and len(dpi) > 1 else dpi_x
+    if rotate in (90, 270):
+        largeur, hauteur = hauteur, largeur
+        dpi_x, dpi_y = dpi_y, dpi_x
+    return largeur, hauteur, dpi_x, dpi_y
 
 
 def fit_geometry(
@@ -144,11 +234,10 @@ def fit_geometry(
     width_mm: float | None = None,
     height_mm: float | None = None,
 ) -> tuple[int, int, float, float]:
-    """Détermine la taille de sortie en pixels machine et en mm.
+    """Détermine la taille de sortie en pixels machine et en millimètres.
 
-    Priorité : dimensions demandées explicitement > dpi de la source > 300 dpi
-    par défaut. Si une seule dimension est donnée, l'autre suit le rapport
-    d'aspect de la source.
+    Priorité : dimensions demandées > dpi de la source > 300 dpi par défaut. Si
+    une seule dimension est donnée, l'autre suit le rapport d'aspect de la source.
     """
     if width_mm is None and height_mm is None:
         sx = src_dpi_x or 300.0

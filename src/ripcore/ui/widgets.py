@@ -1,7 +1,12 @@
-"""Briques d'interface réutilisables.
+"""Briques d'interface.
 
-Rien de spectaculaire, mais tout est ici pour que les écrans se lisent comme
-une description de ce qu'ils montrent, pas comme du code de disposition.
+Tk ne sait pas arrondir un cadre : ce qui doit l'être (interrupteurs, puces
+d'état, sélecteur de mode, boutons d'action) est dessiné au canevas. Le reste
+assume des angles droits, une bordure de 1 px et beaucoup d'air — c'est ce que
+font la plupart des outils professionnels sombres, et c'est net.
+
+Les widgets lisent la palette active via ``theme.courante()`` : une seule
+fenêtre à la fois, donc pas besoin de la faire transiter partout.
 """
 
 from __future__ import annotations
@@ -13,178 +18,171 @@ from tkinter import ttk
 from . import theme
 
 
-class Carte(ttk.Frame):
-    """Bloc blanc titré. L'unité de composition de tous les écrans."""
+def _rect_arrondi(canevas: tk.Canvas, x0, y0, x1, y1, r, **kw) -> None:
+    """Rectangle à coins arrondis : un polygone lissé, sans dépendance."""
+    r = min(r, (x1 - x0) / 2, (y1 - y0) / 2)
+    points = [
+        x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r,
+        x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1,
+        x0, y1, x0, y1 - r, x0, y0 + r, x0, y0,
+    ]
+    canevas.create_polygon(points, smooth=True, splinesteps=24, **kw)
+
+
+# ---------------------------------------------------------------- conteneurs
+
+
+class Carte(tk.Frame):
+    """Panneau de contenu : fond de surface, bordure fine, marges généreuses."""
 
     def __init__(
-        self, parent: tk.Misc, titre: str = "", aide: str = "", **kw
+        self,
+        parent: tk.Misc,
+        titre: str = "",
+        aide: str = "",
+        polices: theme.Polices | None = None,
+        marge: int = 20,
+        **kw,
     ) -> None:
-        super().__init__(parent, style="Carte.TFrame", padding=20, **kw)
-        self.corps = self
+        p = theme.courante()
+        super().__init__(
+            parent, bg=p.surface, highlightthickness=1,
+            highlightbackground=p.bordure, highlightcolor=p.bordure, **kw,
+        )
+        self.interieur = tk.Frame(self, bg=p.surface, padx=marge, pady=marge)
+        self.interieur.pack(fill="both", expand=True)
+
         if titre:
-            ttk.Label(self, text=titre, style="Section.TLabel").pack(
-                anchor="w", pady=(0, 4 if aide else 12)
+            ttk.Label(self.interieur, text=titre, style="Section.TLabel").pack(
+                anchor="w", pady=(0, 4 if aide else 14)
             )
         if aide:
             ttk.Label(
-                self, text=aide, style="Doux.TLabel", wraplength=560, justify="left"
-            ).pack(anchor="w", pady=(0, 12))
+                self.interieur, text=aide, style="Doux.TLabel",
+                wraplength=560, justify="left",
+            ).pack(anchor="w", pady=(0, 14))
+
+    # Les enfants se posent dans ``interieur`` sans avoir à le savoir.
+    def corps(self) -> tk.Frame:
+        return self.interieur
 
 
-class Bandeau(ttk.Frame):
-    """Message d'information ou d'alerte, pleine largeur.
+class Bandeau(tk.Frame):
+    """Message pleine largeur. ``niveau`` : ``info`` (bleu) ou ``alerte`` (rouge).
 
-    ``niveau`` vaut ``info`` (bleu) ou ``alerte`` (rouge). Rien d'autre : un
-    troisième niveau intermédiaire n'aiderait personne à décider quoi faire.
+    Deux niveaux et pas trois : un cran intermédiaire n'aide personne à décider
+    quoi faire.
     """
 
     def __init__(
         self,
         parent: tk.Misc,
         texte: str,
+        polices: theme.Polices,
         niveau: str = "info",
         action: tuple[str, Callable[[], None]] | None = None,
     ) -> None:
+        p = theme.courante()
         alerte = niveau == "alerte"
-        super().__init__(
-            parent, style="Alerte.TFrame" if alerte else "Info.TFrame", padding=(16, 12)
-        )
-        ttk.Label(
-            self,
-            text=("⚠  " if alerte else "ℹ  ") + texte,
-            style="Alerte.TLabel" if alerte else "Info.TLabel",
-            wraplength=680,
-            justify="left",
-        ).pack(side="left", fill="x", expand=True)
+        fond = p.danger_pale if alerte else p.accent_pale
+        plume = p.danger if alerte else p.accent
+        super().__init__(parent, bg=fond, highlightthickness=1,
+                         highlightbackground=plume if alerte else p.accent_pale)
+
+        interieur = tk.Frame(self, bg=fond, padx=16, pady=12)
+        interieur.pack(fill="x")
+        tk.Label(
+            interieur, text=("!" if alerte else "i"), bg=plume,
+            fg=p.accent_texte, font=polices.etiquette, width=2,
+        ).pack(side="left", ipady=2)
+        tk.Label(
+            interieur, text=texte, bg=fond, fg=plume, font=polices.corps,
+            wraplength=700, justify="left", anchor="w",
+        ).pack(side="left", fill="x", expand=True, padx=(12, 0))
         if action is not None:
             libelle, rappel = action
-            ttk.Button(self, text=libelle, command=rappel).pack(
+            ttk.Button(interieur, text=libelle, command=rappel).pack(
                 side="right", padx=(16, 0)
             )
 
 
-class Champ(ttk.Frame):
-    """Étiquette au-dessus, saisie en dessous, aide facultative en petit."""
-
-    def __init__(
-        self,
-        parent: tk.Misc,
-        etiquette: str,
-        variable: tk.Variable,
-        aide: str = "",
-        largeur: int = 12,
-        valeurs: list[str] | None = None,
-        sur_changement: Callable[[], None] | None = None,
-    ) -> None:
-        super().__init__(parent, style="Carte.TFrame")
-        ttk.Label(self, text=etiquette, style="Carte.TLabel").pack(anchor="w")
-        if valeurs is None:
-            self.saisie: ttk.Widget = ttk.Entry(
-                self, textvariable=variable, width=largeur, font=None
-            )
-            if sur_changement is not None:
-                variable.trace_add("write", lambda *_: sur_changement())
-        else:
-            self.saisie = ttk.Combobox(
-                self,
-                textvariable=variable,
-                values=valeurs,
-                state="readonly",
-                width=largeur,
-            )
-            if sur_changement is not None:
-                self.saisie.bind("<<ComboboxSelected>>", lambda _e: sur_changement())
-        self.saisie.pack(anchor="w", pady=(4, 0), fill="x")
-        if aide:
-            ttk.Label(
-                self, text=aide, style="Doux.TLabel", wraplength=340, justify="left"
-            ).pack(anchor="w", pady=(4, 0))
+# ------------------------------------------------------------------ commandes
 
 
-class BoutonGeant(tk.Frame):
-    """Grand bouton d'action, dessiné à la main.
+class Segments(tk.Canvas):
+    """Sélecteur à segments — le « Simple / Avancé » de la barre supérieure.
 
-    ttk ne permet pas de fixer une hauteur en pixels ni d'empiler deux lignes
-    de texte ; or l'action principale d'un écran doit être évidente et large.
+    Deux boutons radio feraient le même travail, mais un sélecteur segmenté dit
+    d'un coup d'œil qu'il s'agit de deux vues d'une même chose, et non de deux
+    réglages indépendants.
     """
 
     def __init__(
         self,
         parent: tk.Misc,
-        texte: str,
-        commande: Callable[[], None],
+        options: list[tuple[str, str]],
+        variable: tk.StringVar,
         polices: theme.Polices,
-        sous_texte: str = "",
-        variante: str = "primaire",
+        sur_changement: Callable[[str], None] | None = None,
+        largeur_segment: int = 96,
+        hauteur: int = 34,
     ) -> None:
-        couleurs = {
-            "primaire": (theme.BLEU, theme.BLEU_FONCE, theme.BLANC),
-            "danger": (theme.ROUGE, theme.ROUGE_FONCE, theme.BLANC),
-            "neutre": (theme.BLANC, theme.BLEU_PALE, theme.BLEU),
-        }[variante]
-        self._fond, self._survol, self._texte_couleur = couleurs
-        self._commande = commande
-        self._actif = True
-
-        super().__init__(parent, bg=self._fond, cursor="hand2",
-                         highlightthickness=1,
-                         highlightbackground=theme.BLEU_TRAIT
-                         if variante == "neutre" else self._fond)
-        pad = 14 if sous_texte else 16
-        self._titre = tk.Label(
-            self, text=texte, bg=self._fond, fg=self._texte_couleur,
-            font=polices.bouton,
+        p = theme.courante()
+        self._segments = options  # ne pas nommer _options : réservé par Tk
+        self._variable = variable
+        self._police = polices.corps_gras
+        self._largeur = largeur_segment
+        self._hauteur = hauteur
+        self._rappel = sur_changement
+        super().__init__(
+            parent, width=largeur_segment * len(options) + 6, height=hauteur,
+            bg=p.fond, highlightthickness=0, cursor="hand2",
         )
-        self._titre.pack(pady=(pad, 0), padx=24)
-        self._sous = None
-        if sous_texte:
-            self._sous = tk.Label(
-                self, text=sous_texte, bg=self._fond, fg=self._texte_couleur,
-                font=polices.petit,
+        self.bind("<Button-1>", self._clic)
+        variable.trace_add("write", lambda *_: self._dessiner())
+        self._dessiner()
+
+    def _clic(self, event: tk.Event) -> None:
+        index = min(len(self._segments) - 1, max(0, (event.x - 3) // self._largeur))
+        cle = self._segments[index][0]
+        if cle != self._variable.get():
+            self._variable.set(cle)
+            if self._rappel is not None:
+                self._rappel(cle)
+
+    def _dessiner(self) -> None:
+        p = theme.courante()
+        self.delete("all")
+        self.configure(bg=p.fond)
+        h = self._hauteur
+        _rect_arrondi(self, 0, 0, self._largeur * len(self._segments) + 6, h, 9,
+                      fill=p.surface_haute, outline=p.bordure)
+        actif = self._variable.get()
+        for i, (cle, libelle) in enumerate(self._segments):
+            x0 = 3 + i * self._largeur
+            x1 = x0 + self._largeur
+            choisi = cle == actif
+            if choisi:
+                _rect_arrondi(self, x0, 3, x1, h - 3, 7,
+                              fill=p.accent, outline=p.accent)
+            self.create_text(
+                (x0 + x1) / 2, h / 2, text=libelle, font=self._police,
+                fill=p.accent_texte if choisi else p.texte_doux,
             )
-            self._sous.pack(pady=(2, pad), padx=24)
-        else:
-            self._titre.pack_configure(pady=(pad, pad))
 
-        for w in self._parties():
-            w.bind("<Button-1>", self._clic)
-            w.bind("<Enter>", lambda _e: self._peindre(self._survol))
-            w.bind("<Leave>", lambda _e: self._peindre(self._fond))
-
-    def _parties(self) -> list[tk.Widget]:
-        return [w for w in (self, self._titre, self._sous) if w is not None]
-
-    def _peindre(self, couleur: str) -> None:
-        if not self._actif:
-            return
-        for w in self._parties():
-            w.configure(bg=couleur)
-
-    def _clic(self, _event: tk.Event) -> None:
-        if self._actif:
-            self._commande()
-
-    def configurer_texte(self, texte: str) -> None:
-        self._titre.configure(text=texte)
-
-    def activer(self, actif: bool) -> None:
-        self._actif = actif
-        couleur = self._fond if actif else theme.DESACTIVE
-        for w in self._parties():
-            w.configure(bg=couleur)
-        self.configure(cursor="hand2" if actif else "")
+    def rafraichir(self) -> None:
+        self._dessiner()
 
 
 class Interrupteur(tk.Frame):
-    """Interrupteur oui/non, dessiné à la main.
+    """Interrupteur oui/non, cliquable sur toute sa ligne.
 
-    La case à cocher ttk fait 13 px de côté : trop petite à viser debout, et
-    son état se lit mal de loin. Un interrupteur montre sa position d'un coup
-    d'œil et se clique n'importe où sur sa ligne, libellé compris.
+    La case à cocher ttk fait 13 px de côté : trop petite à viser debout, et son
+    état se lit mal de loin.
     """
 
-    LARGEUR = 52
-    HAUTEUR = 28
+    LARGEUR = 46
+    HAUTEUR = 26
 
     def __init__(
         self,
@@ -193,32 +191,33 @@ class Interrupteur(tk.Frame):
         variable: tk.BooleanVar,
         polices: theme.Polices,
         aide: str = "",
-        largeur_aide: int = 480,
+        largeur_aide: int = 460,
+        fond: str | None = None,
     ) -> None:
-        super().__init__(parent, bg=theme.BLANC)
+        p = theme.courante()
+        self._fond = fond or p.surface
+        super().__init__(parent, bg=self._fond)
         self.variable = variable
 
-        ligne = tk.Frame(self, bg=theme.BLANC, cursor="hand2")
+        ligne = tk.Frame(self, bg=self._fond, cursor="hand2")
         ligne.pack(fill="x")
-
         self._piste = tk.Canvas(
-            ligne, width=self.LARGEUR, height=self.HAUTEUR,
-            bg=theme.BLANC, highlightthickness=0, cursor="hand2",
+            ligne, width=self.LARGEUR, height=self.HAUTEUR, bg=self._fond,
+            highlightthickness=0, cursor="hand2",
         )
         self._piste.pack(side="left")
-
         self._libelle = tk.Label(
-            ligne, text=texte, bg=theme.BLANC, fg=theme.TEXTE,
-            font=polices.corps, cursor="hand2", anchor="w",
+            ligne, text=texte, bg=self._fond, fg=p.texte, font=polices.corps,
+            cursor="hand2", anchor="w",
         )
         self._libelle.pack(side="left", padx=(12, 0))
 
         if aide:
             tk.Label(
-                self, text=aide, bg=theme.BLANC, fg=theme.TEXTE_DOUX,
+                self, text=aide, bg=self._fond, fg=p.texte_doux,
                 font=polices.petit, wraplength=largeur_aide, justify="left",
                 anchor="w",
-            ).pack(anchor="w", padx=(self.LARGEUR + 12, 0), pady=(2, 0))
+            ).pack(anchor="w", padx=(self.LARGEUR + 12, 0), pady=(3, 0))
 
         for w in (ligne, self._piste, self._libelle):
             w.bind("<Button-1>", self._basculer)
@@ -229,33 +228,200 @@ class Interrupteur(tk.Frame):
         self.variable.set(not self.variable.get())
 
     def _dessiner(self) -> None:
+        p = theme.courante()
         actif = bool(self.variable.get())
         c = self._piste
         c.delete("all")
-        h = self.HAUTEUR
-        r = h // 2
-        fond = theme.BLEU if actif else theme.TRAIT
-        # Piste en forme de gélule : deux disques et un rectangle.
-        c.create_oval(0, 0, h, h, fill=fond, outline=fond)
-        c.create_oval(self.LARGEUR - h, 0, self.LARGEUR, h, fill=fond, outline=fond)
-        c.create_rectangle(r, 0, self.LARGEUR - r, h, fill=fond, outline=fond)
-        x = self.LARGEUR - r if actif else r
+        h, r = self.HAUTEUR, self.HAUTEUR // 2
+        fond = p.accent if actif else p.surface_haute
+        contour = p.accent if actif else p.bordure
+        _rect_arrondi(c, 1, 1, self.LARGEUR - 1, h - 1, r, fill=fond, outline=contour)
+        x = self.LARGEUR - r - 1 if actif else r + 1
         c.create_oval(
-            x - r + 3, 3, x + r - 3, h - 3, fill=theme.BLANC, outline=theme.BLANC
+            x - r + 4, 5, x + r - 4, h - 5,
+            fill=p.accent_texte if actif else p.texte_doux, outline="",
         )
+
+
+class BoutonAction(tk.Canvas):
+    """Bouton d'action principal, dessiné : coins arrondis et hauteur fixe."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        texte: str,
+        commande: Callable[[], None],
+        polices: theme.Polices,
+        variante: str = "accent",
+        hauteur: int = 46,
+        fond_parent: str | None = None,
+    ) -> None:
+        p = theme.courante()
+        self._variante = variante
+        self._commande = commande
+        self._police = polices.bouton
+        self._texte = texte
+        self._hauteur = hauteur
+        self._survol = False
+        self._actif = True
+        self._fond_parent = fond_parent or p.surface
+        super().__init__(
+            parent, height=hauteur, bg=self._fond_parent,
+            highlightthickness=0, cursor="hand2",
+        )
+        self.bind("<Button-1>", self._clic)
+        self.bind("<Enter>", lambda _e: self._etat_survol(True))
+        self.bind("<Leave>", lambda _e: self._etat_survol(False))
+        self.bind("<Configure>", lambda _e: self._dessiner())
+
+    def _couleurs(self) -> tuple[str, str]:
+        p = theme.courante()
+        if not self._actif:
+            return p.surface_haute, p.texte_faible
+        if self._variante == "accent":
+            return (p.accent_fonce if self._survol else p.accent), p.accent_texte
+        if self._variante == "danger":
+            return (p.danger_fonce if self._survol else p.danger), p.accent_texte
+        return (p.bordure if self._survol else p.surface_haute), p.texte
+
+    def _etat_survol(self, dessus: bool) -> None:
+        self._survol = dessus and self._actif
+        self._dessiner()
+
+    def _clic(self, _event: tk.Event) -> None:
+        if self._actif:
+            self._commande()
+
+    def _dessiner(self) -> None:
+        self.delete("all")
+        fond, plume = self._couleurs()
+        w = max(self.winfo_width(), 40)
+        h = self._hauteur
+        _rect_arrondi(self, 0, 0, w, h, 8, fill=fond, outline=fond)
+        self.create_text(w / 2, h / 2, text=self._texte, font=self._police, fill=plume)
+
+    def configurer_texte(self, texte: str) -> None:
+        self._texte = texte
+        self._dessiner()
+
+    def activer(self, actif: bool) -> None:
+        self._actif = actif
+        self.configure(cursor="hand2" if actif else "")
+        self._dessiner()
+
+    def rafraichir(self) -> None:
+        p = theme.courante()
+        self._fond_parent = p.surface
+        self.configure(bg=self._fond_parent)
+        self._dessiner()
+
+
+class Puce(tk.Canvas):
+    """Petite pastille d'état : « Prête » ou « À régler »."""
+
+    def __init__(
+        self, parent: tk.Misc, texte: str, polices: theme.Polices,
+        niveau: str = "info", fond_parent: str | None = None,
+    ) -> None:
+        p = theme.courante()
+        self._police = polices.etiquette
+        self._texte = texte
+        self._niveau = niveau
+        largeur = self._police.measure(texte) + 24
+        super().__init__(
+            parent, width=largeur, height=22,
+            bg=fond_parent or p.fond, highlightthickness=0,
+        )
+        self._dessiner()
+
+    def _dessiner(self) -> None:
+        p = theme.courante()
+        self.delete("all")
+        fond = p.danger_pale if self._niveau == "alerte" else p.accent_pale
+        plume = p.danger if self._niveau == "alerte" else p.accent
+        w = int(self["width"])
+        _rect_arrondi(self, 0, 0, w, 22, 11, fill=fond, outline=plume)
+        self.create_text(w / 2, 11, text=self._texte, font=self._police, fill=plume)
+
+    def definir(self, texte: str, niveau: str) -> None:
+        self._texte, self._niveau = texte, niveau
+        self.configure(width=self._police.measure(texte) + 24)
+        self._dessiner()
+
+
+# --------------------------------------------------------------------- saisie
+
+
+class Champ(tk.Frame):
+    """Étiquette au-dessus, saisie en dessous, aide facultative."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        etiquette: str,
+        variable: tk.Variable,
+        polices: theme.Polices,
+        aide: str = "",
+        largeur: int = 12,
+        valeurs: list[str] | None = None,
+        sur_changement: Callable[[], None] | None = None,
+        suffixe: str = "",
+        fond: str | None = None,
+        largeur_aide: int = 320,
+    ) -> None:
+        p = theme.courante()
+        self._fond = fond or p.surface
+        super().__init__(parent, bg=self._fond)
+
+        tk.Label(
+            self, text=etiquette.upper(), bg=self._fond, fg=p.texte_doux,
+            font=polices.etiquette, anchor="w",
+        ).pack(anchor="w", pady=(0, 5))
+
+        ligne = tk.Frame(self, bg=self._fond)
+        ligne.pack(fill="x")
+        if valeurs is None:
+            self.saisie: ttk.Widget = ttk.Entry(
+                ligne, textvariable=variable, width=largeur, font=polices.corps
+            )
+            if sur_changement is not None:
+                variable.trace_add("write", lambda *_: sur_changement())
+        else:
+            self.saisie = ttk.Combobox(
+                ligne, textvariable=variable, values=valeurs,
+                state="readonly", width=largeur, font=polices.corps,
+            )
+            if sur_changement is not None:
+                self.saisie.bind("<<ComboboxSelected>>", lambda _e: sur_changement())
+        self.saisie.pack(side="left", fill="x", expand=True)
+        if suffixe:
+            tk.Label(
+                ligne, text=suffixe, bg=self._fond, fg=p.texte_doux,
+                font=polices.petit,
+            ).pack(side="left", padx=(8, 0))
+
+        self.aide = None
+        if aide:
+            self.aide = tk.Label(
+                self, text=aide, bg=self._fond, fg=p.texte_faible,
+                font=polices.minuscule, wraplength=largeur_aide,
+                justify="left", anchor="w",
+            )
+            self.aide.pack(anchor="w", pady=(5, 0))
+
+    def definir_aide(self, texte: str) -> None:
+        if self.aide is not None:
+            self.aide.configure(text=texte)
 
 
 class ZoneApercu(tk.Canvas):
     """Cadre d'aperçu, avec un texte d'attente tant qu'il n'y a rien à montrer."""
 
     def __init__(self, parent: tk.Misc, largeur: int = 380, hauteur: int = 300) -> None:
+        p = theme.courante()
         super().__init__(
-            parent,
-            width=largeur,
-            height=hauteur,
-            bg=theme.BLANC,
-            highlightthickness=1,
-            highlightbackground=theme.TRAIT,
+            parent, width=largeur, height=hauteur, bg=p.surface_haute,
+            highlightthickness=1, highlightbackground=p.bordure,
         )
         self._largeur = largeur
         self._hauteur = hauteur
@@ -263,19 +429,16 @@ class ZoneApercu(tk.Canvas):
         self.vider()
 
     def vider(self, message: str = "L'aperçu s'affichera ici") -> None:
+        p = theme.courante()
         self.delete("all")
         self._image = None
+        self.configure(bg=p.surface_haute, highlightbackground=p.bordure)
         self.create_text(
-            self._largeur // 2,
-            self._hauteur // 2,
-            text=message,
-            fill=theme.TEXTE_DOUX,
-            width=self._largeur - 40,
-            justify="center",
+            self._largeur // 2, self._hauteur // 2, text=message,
+            fill=p.texte_faible, width=self._largeur - 40, justify="center",
         )
 
     def montrer(self, chemin) -> None:
-        """Affiche une image, redimensionnée pour tenir dans le cadre."""
         from PIL import Image, ImageTk  # noqa: PLC0415
 
         with Image.open(chemin) as im:
@@ -288,21 +451,37 @@ class ZoneApercu(tk.Canvas):
         self.create_image(self._largeur // 2, self._hauteur // 2, image=photo)
 
 
-def separateur(parent: tk.Misc) -> ttk.Separator:
-    s = ttk.Separator(parent, orient="horizontal")
-    s.pack(fill="x", pady=14)
-    return s
+# ------------------------------------------------------------------ structure
+
+
+def titre_section(parent: tk.Misc, texte: str, polices: theme.Polices,
+                  fond: str | None = None) -> tk.Label:
+    """Petite étiquette majuscule qui sépare deux groupes de réglages."""
+    p = theme.courante()
+    return tk.Label(
+        parent, text=texte.upper(), bg=fond or p.surface, fg=p.texte_faible,
+        font=polices.etiquette, anchor="w",
+    )
+
+
+def trait(parent: tk.Misc, fond: str | None = None) -> tk.Frame:
+    p = theme.courante()
+    ligne = tk.Frame(parent, bg=p.bordure_douce, height=1)
+    ligne.pack(fill="x", pady=16)
+    return ligne
 
 
 def cadre_defilant(parent: tk.Misc) -> tuple[tk.Canvas, ttk.Frame]:
     """Zone défilante verticale. Renvoie (canevas, cadre où empiler le contenu).
 
-    La molette est branchée sur toute la zone : sans ça, l'opérateur doit viser
-    la barre de défilement, ce qui est pénible debout devant une machine.
+    La molette est branchée sur toute la zone : viser la barre de défilement
+    debout devant une machine est pénible. La barre disparaît quand il n'y a
+    rien à faire défiler.
     """
-    canevas = tk.Canvas(parent, bg=theme.FOND, highlightthickness=0)
+    p = theme.courante()
+    canevas = tk.Canvas(parent, bg=p.fond, highlightthickness=0)
     barre = ttk.Scrollbar(parent, orient="vertical", command=canevas.yview)
-    interieur = ttk.Frame(canevas, style="TFrame", padding=(0, 0, 12, 0))
+    interieur = ttk.Frame(canevas, style="TFrame", padding=(0, 0, 14, 0))
 
     fenetre = canevas.create_window((0, 0), window=interieur, anchor="nw")
     canevas.configure(yscrollcommand=barre.set)
@@ -311,8 +490,6 @@ def cadre_defilant(parent: tk.Misc) -> tuple[tk.Canvas, ttk.Frame]:
         boite = canevas.bbox("all")
         canevas.configure(scrollregion=boite)
         canevas.itemconfigure(fenetre, width=canevas.winfo_width())
-        # Une barre de défilement affichée alors qu'il n'y a rien à faire
-        # défiler encombre et laisse croire qu'un contenu est caché.
         if boite is not None and boite[3] <= canevas.winfo_height():
             barre.pack_forget()
         else:
@@ -322,10 +499,12 @@ def cadre_defilant(parent: tk.Misc) -> tuple[tk.Canvas, ttk.Frame]:
     canevas.bind("<Configure>", _maj)
 
     def _molette(event: tk.Event) -> None:
-        delta = event.delta
-        pas = -1 if delta > 0 else 1
-        if delta in (4, 5):  # X11 renvoie des boutons, pas un delta
-            pas = -1 if delta == 4 else 1
+        if event.num == 4:
+            pas = -1
+        elif event.num == 5:
+            pas = 1
+        else:
+            pas = -1 if event.delta > 0 else 1
         canevas.yview_scroll(pas, "units")
 
     for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):

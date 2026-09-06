@@ -174,27 +174,44 @@ class TestInkLimits:
 
 
 class TestWhite:
-    def test_sous_couche_suit_la_couverture(self):
+    def test_par_defaut_le_blanc_couvre_toute_la_surface(self):
+        """Sans transparence, le visuel est un rectangle plein.
+
+        Ses zones blanches font partie de l'image : les laisser nues montrerait
+        la brique ou le béton à la place du blanc voulu.
+        """
         ink = np.zeros((4, 20, 20), dtype=np.float32)
         ink[0, 5:15, 5:15] = 0.5
         w = underbase(ink, choke_px=0)
+        assert w[10, 10] == pytest.approx(1.0)
+        assert w[0, 0] == pytest.approx(1.0)  # y compris hors du dessin
+
+    def test_mode_encre_suit_le_dessin(self):
+        """Pour poser une forme sur un mur sans rectangle blanc autour."""
+        ink = np.zeros((4, 20, 20), dtype=np.float32)
+        ink[0, 5:15, 5:15] = 0.5
+        w = underbase(ink, choke_px=0, mode="encre")
         assert w[10, 10] == pytest.approx(1.0)
         assert w[0, 0] == pytest.approx(0.0)
 
     def test_choke_retracte_les_bords(self):
         ink = np.zeros((4, 20, 20), dtype=np.float32)
         ink[0, 5:15, 5:15] = 1.0
-        sans = underbase(ink, choke_px=0)
-        avec = underbase(ink, choke_px=2)
+        sans = underbase(ink, choke_px=0, mode="encre")
+        avec = underbase(ink, choke_px=2, mode="encre")
         assert avec.sum() < sans.sum()
         assert avec[10, 10] == pytest.approx(1.0)  # le cœur reste plein
         assert avec[5, 5] == pytest.approx(0.0)  # le bord est retiré
+
+    def test_mode_de_blanc_inconnu_refuse(self):
+        with pytest.raises(RipError, match="mode de blanc"):
+            underbase(np.zeros((4, 4, 4), dtype=np.float32), mode="fantaisie")
 
     def test_jaune_clair_seul_declenche_du_blanc(self):
         """Le max, pas la somme : sinon un aplat jaune pâle sort sans blanc."""
         ink = np.zeros((4, 8, 8), dtype=np.float32)
         ink[2] = 0.05
-        assert underbase(ink, choke_px=0).mean() == pytest.approx(1.0)
+        assert underbase(ink, choke_px=0, mode="encre").mean() == pytest.approx(1.0)
 
     def test_alpha_prime_sur_la_couverture(self):
         ink = np.zeros((4, 10, 10), dtype=np.float32)
@@ -320,8 +337,8 @@ class TestEndToEnd:
 
         report = validate_prn(out, printer)
         assert report.ok, report.render(verbose=True)
-        # Le blanc doit avoir été généré sous les zones imprimées, et nulle part ailleurs.
-        assert 0.0 < result.coverage["W"] < 1.0
+        # Sans transparence, le blanc couvre toute la surface imprimée.
+        assert result.coverage["W"] == pytest.approx(1.0, abs=0.02)
 
     def test_manifeste_porte_la_largeur_utile(self, tmp_path, printer):
         """Le .prn ne conserve pas la largeur réelle : le manifeste, si."""
@@ -393,6 +410,113 @@ class TestEndToEnd:
         report = validate_prn(out, printer)
         assert not report.ok
         assert any(f.check == "encre/process" for f in report.errors)
+
+
+class TestFormatsEntree:
+    """Ce qu'on peut réellement donner à manger au RIP.
+
+    Deux défauts trouvés en dressant cette matrice, dont un grave : une image
+    16 bits était acceptée et ressortait entièrement blanche. Une sortie muette
+    et fausse est bien pire qu'un refus — d'où ces tests.
+    """
+
+    def _gradient(self, tmp_path, mode, nom):
+        from PIL import Image
+
+        brut = np.tile(np.linspace(0, 65535, 400, dtype=np.uint16), (250, 1))
+        if mode == "L":
+            im = Image.fromarray((brut // 257).astype(np.uint8), "L")
+        elif mode == "I;16":
+            im = Image.fromarray(brut)  # uint16 -> I;16
+        elif mode == "1":
+            im = Image.fromarray((brut > 32767).astype(np.uint8) * 255, "L").convert("1")
+        elif mode == "P":
+            im = Image.fromarray((brut // 257).astype(np.uint8), "L").convert("P")
+        elif mode == "RGB":
+            im = Image.fromarray(
+                np.dstack([(brut // 257).astype(np.uint8)] * 3), "RGB"
+            )
+        else:
+            raise AssertionError(mode)
+        chemin = tmp_path / nom
+        im.save(chemin)
+        return chemin
+
+    def _couverture(self, source, sortie, printer):
+        return run_job(JobSpec(
+            source=source, output=sortie, printer=printer,
+            media=MediaProfile(name="t"), width_mm=25.0,
+        )).coverage
+
+    @pytest.mark.parametrize("mode,nom", [
+        ("L", "gris8.tif"), ("I;16", "gris16.tif"),
+        ("1", "trait.tif"), ("P", "palette.tif"), ("RGB", "couleur.tif"),
+    ])
+    def test_les_modes_courants_passent(self, tmp_path, printer, mode, nom):
+        src = self._gradient(tmp_path, mode, nom)
+        couverture = self._couverture(src, tmp_path / f"{mode}.prn", printer)
+        assert sum(couverture.values()) > 0.01, (
+            f"le mode {mode} produit un fichier vide — perte de données silencieuse"
+        )
+
+    def test_le_16_bits_donne_le_meme_resultat_que_le_8_bits(self, tmp_path, printer):
+        """Pillow tronque les modes 16 bits à 255 : l'image sortait blanche.
+
+        Le gradient est identique, seule la profondeur change : la couverture
+        doit l'être aussi.
+        """
+        huit = self._gradient(tmp_path, "L", "h.tif")
+        seize = self._gradient(tmp_path, "I;16", "s.tif")
+        a = self._couverture(huit, tmp_path / "h.prn", printer)
+        b = self._couverture(seize, tmp_path / "s.prn", printer)
+        for encre in a:
+            assert a[encre] == pytest.approx(b[encre], abs=0.01), (
+                f"encre {encre} : 8 bits {a[encre]:.3f} vs 16 bits {b[encre]:.3f}"
+            )
+
+    def test_le_gris_se_separe_comme_un_rgb_neutre(self, tmp_path, printer):
+        gris = self._gradient(tmp_path, "L", "g.tif")
+        couleur = self._gradient(tmp_path, "RGB", "c.tif")
+        a = self._couverture(gris, tmp_path / "g.prn", printer)
+        b = self._couverture(couleur, tmp_path / "c.prn", printer)
+        for encre in a:
+            assert a[encre] == pytest.approx(b[encre], abs=0.01)
+
+    def test_la_transparence_retient_le_blanc(self, tmp_path, printer):
+        """Sans alpha, le blanc couvre tout ; avec, il suit le dessin."""
+        from PIL import Image, ImageDraw
+
+        opaque = tmp_path / "opaque.png"
+        Image.new("RGB", (400, 300), (255, 255, 255)).save(opaque)
+        transparent = tmp_path / "alpha.png"
+        im = Image.new("RGBA", (400, 300), (250, 250, 248, 0))
+        ImageDraw.Draw(im).ellipse([40, 30, 200, 260], fill=(220, 50, 40, 255))
+        im.save(transparent)
+
+        media = MediaProfile(name="t", white_underbase=True)
+        def blanc(source, sortie):
+            return run_job(JobSpec(
+                source=source, output=sortie, printer=printer, media=media,
+                width_mm=25.0,
+            )).coverage["W"]
+
+        assert blanc(opaque, tmp_path / "o.prn") > 0.9
+        assert 0.05 < blanc(transparent, tmp_path / "a.prn") < 0.6
+
+    def test_un_mode_illisible_est_refuse_clairement(self, tmp_path):
+        from ripcore.inputs.source import _normaliser_mode
+
+        class Faux:
+            mode = "CMYKA"
+
+        with pytest.raises(RipError, match="n'est pas pris en charge"):
+            _normaliser_mode(Faux(), None)
+
+    def test_un_fichier_qui_n_est_pas_une_image_est_refuse(self, tmp_path, printer):
+        faux = tmp_path / "doc.png"
+        faux.write_bytes(b"ceci n'est pas une image")
+        with pytest.raises(Exception):
+            self._couverture(faux, tmp_path / "x.prn", printer)
 
 
 class TestMemoire:

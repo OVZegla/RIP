@@ -142,6 +142,7 @@ class Session:
         encre_totale: float | None = None,
         densite_blanc: float | None = None,
         retrait_blanc: int | None = None,
+        mode_blanc: str | None = None,
         suffixe: str = "",
     ) -> JobSpec:
         """Choix d'écran → JobSpec, avec les vérifications à faire tôt."""
@@ -178,6 +179,7 @@ class Session:
             white_choke_px=(
                 retrait_blanc if retrait_blanc is not None else media.white_choke_px
             ),
+            white_mode=mode_blanc or media.white_mode,
             notes=media.notes,
             source=media.source,
         )

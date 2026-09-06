@@ -35,7 +35,16 @@ RASTER_SUFFIXES = frozenset(
 )
 PDF_SUFFIXES = frozenset({".pdf", ".ps", ".eps", ".ai"})
 
+# Ce que la suite de la chaîne sait traiter.
 _MODES_SUPPORTES = ("RGB", "CMYK", "L")
+
+# Modes à plus de 8 bits par composante. Pillow les convertit en « L » en
+# tronquant à 255 : une image 16 bits en ressort entièrement blanche ou noire,
+# sans le moindre message. On refait donc l'échelle nous-mêmes.
+_MODES_PROFONDS = ("I;16", "I;16B", "I;16L", "I;16N", "I", "F")
+
+# Modes à convertir en RGB sans précaution particulière.
+_MODES_VERS_RGB = ("P", "PA", "LAB", "HSV", "YCbCr")
 
 
 def _pillow():
@@ -191,8 +200,8 @@ def load_source(
         rgba = image.convert("RGBA")
         alpha = rgba.getchannel("A")
         image = rgba.convert("RGB")
-    elif image.mode not in _MODES_SUPPORTES:
-        image = image.convert("RGB")
+    else:
+        image = _normaliser_mode(image, Image)
 
     if rotate:
         transposition = {
@@ -217,6 +226,38 @@ def load_source(
         _image=image,
         _alpha=alpha,
         _filtre=filtre,
+    )
+
+
+def _normaliser_mode(image, Image):
+    """Ramène l'image à RGB, CMJN ou niveaux de gris, à la bonne échelle.
+
+    Le cas qui compte : Pillow convertit les modes 16 bits en tronquant à 255,
+    ce qui rend l'image blanche sans rien signaler. Une sortie blanche
+    silencieuse est bien pire qu'un refus — on refait donc la mise à l'échelle
+    à la main, et on refuse explicitement ce qu'on ne sait pas lire.
+    """
+    mode = image.mode
+    if mode in _MODES_SUPPORTES:
+        return image
+    if mode == "1":  # bitmap noir et blanc
+        return image.convert("L")
+    if mode in _MODES_PROFONDS:
+        tableau = np.asarray(image)
+        if tableau.dtype == np.uint16:
+            maximum = 65535.0
+        elif np.issubdtype(tableau.dtype, np.floating):
+            # Images en flottant : l'échelle n'est pas normalisée, on la déduit.
+            maximum = float(tableau.max()) or 1.0
+        else:
+            maximum = float(max(int(tableau.max()), 1))
+        octets = np.clip(tableau / maximum * 255.0, 0, 255).astype(np.uint8)
+        return Image.fromarray(octets if octets.ndim == 2 else octets[..., 0], "L")
+    if mode in _MODES_VERS_RGB:
+        return image.convert("RGB")
+    raise RipError(
+        f"image en mode {mode!r} : ce type d'image n'est pas pris en charge. "
+        f"Enregistrez-la en RGB, en niveaux de gris ou en CMJN."
     )
 
 

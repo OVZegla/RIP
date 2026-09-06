@@ -346,6 +346,7 @@ class MediaProfile:
     white_underbase: bool = False
     white_density: float = 1.0
     white_choke_px: int = 2
+    white_mode: str = "surface"  # "surface" | "encre" — voir color.white
     notes: str = ""
     source: Path | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -379,6 +380,7 @@ class MediaProfile:
             white_underbase=bool(media.get("white_underbase", False)),
             white_density=float(media.get("white_density", 1.0)),
             white_choke_px=int(media.get("white_choke_px", 2)),
+            white_mode=str(media.get("white_mode", "surface")),
             notes=media.get("notes", ""),
             source=p,
             extra={k: v for k, v in media.items() if k not in _MEDIA_KNOWN},
@@ -397,6 +399,7 @@ _MEDIA_KNOWN = frozenset(
         "white_underbase",
         "white_density",
         "white_choke_px",
+        "white_mode",
         "notes",
     }
 )

@@ -123,7 +123,9 @@ def build_icc_lut(
     ci = _MODE_CHANNELS[in_mode]
     co = _MODE_CHANNELS[out_mode]
     if grid is None:
-        grid = DEFAULT_GRID_3D if ci == 3 else DEFAULT_GRID_4D
+        # Une entrée à un seul canal est une simple rampe : on l'échantillonne
+        # finement, 17 points laisseraient des marches dans un dégradé de gris.
+        grid = {1: 256, 3: DEFAULT_GRID_3D}.get(ci, DEFAULT_GRID_4D)
     try:
         intent_id = INTENTS[intent]
     except KeyError:

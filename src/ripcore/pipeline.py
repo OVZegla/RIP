@@ -119,6 +119,13 @@ def _build_color_transform(
     if media.icc_output is None:
         if img.mode == "CMYK":
             return (lambda a: a), "aucun profil (CMJN source passé tel quel)"
+        if img.mode == "L":
+            # Un gris est un RGB neutre : on le développe plutôt que d'ajouter
+            # un second chemin de séparation à maintenir.
+            def _gris(a: np.ndarray) -> np.ndarray:
+                return icc_mod.naive_rgb_to_cmyk(np.repeat(a, 3, axis=0))
+
+            return _gris, "SÉPARATION NAÏVE — aucun profil ICC de sortie"
         return (
             icc_mod.naive_rgb_to_cmyk,
             "SÉPARATION NAÏVE — aucun profil ICC de sortie",
@@ -171,6 +178,7 @@ def _assemble(
                     density=media.white_density,
                     choke_px=media.white_choke_px,
                     alpha=alpha,
+                    mode=media.white_mode,
                 )
         elif ch.role == ROLE_VARNISH:
             out[i] = varnish(cmyk, mode="flood", density=1.0)

@@ -44,6 +44,11 @@ def erode(mask: np.ndarray, radius: int) -> np.ndarray:
     return out
 
 
+MODE_SURFACE = "surface"  # blanc sous toute la surface imprimée
+MODE_ENCRE = "encre"  # blanc seulement là où il y a de la couleur
+MODES_BLANC = (MODE_SURFACE, MODE_ENCRE)
+
+
 def underbase(
     process_ink: np.ndarray,
     *,
@@ -51,16 +56,32 @@ def underbase(
     choke_px: int = 2,
     threshold: float = 0.004,
     alpha: np.ndarray | None = None,
+    mode: str = MODE_SURFACE,
 ) -> np.ndarray:
-    """Sous-couche blanche (H, W) 0..1 déduite de la couverture couleur.
+    """Sous-couche blanche (H, W) 0..1.
 
-    ``alpha`` — si l'image source porte une transparence, elle prime : c'est la
-    seule information fiable sur « où il y a de l'image », y compris dans les
-    zones très claires que la couverture d'encre ne détecte pas.
+    Trois sources d'information, dans cet ordre :
+
+    1. **La transparence**, si l'image en porte une. C'est la seule indication
+       fiable de « où il y a de l'image », y compris dans les zones si claires
+       qu'elles ne déposent presque pas d'encre.
+    2. **La surface imprimée** (``mode="surface"``, le défaut). Sans
+       transparence, le visuel est un rectangle plein : ses zones blanches font
+       partie de l'image et doivent recevoir du blanc. Les laisser nues
+       reviendrait à y montrer le mur — brique, béton ou bois — à la place du
+       blanc voulu.
+    3. **La couverture d'encre** (``mode="encre"``). Le blanc ne va que là où il
+       y a de la couleur. Utile pour poser une forme sur un mur sans le
+       rectangle blanc autour, mais à ne pas prendre par défaut : une photo avec
+       un ciel clair y perdrait son ciel.
     """
     a = np.asarray(process_ink, dtype=np.float32)
     if a.ndim != 3:
         raise RipError(f"couches process (C, H, W) attendues, reçu {a.shape}")
+    if mode not in MODES_BLANC:
+        raise RipError(
+            f"mode de blanc inconnu : {mode!r} ({' | '.join(MODES_BLANC)})"
+        )
 
     if alpha is not None:
         cover = np.clip(np.asarray(alpha, dtype=np.float32), 0.0, 1.0)
@@ -68,10 +89,11 @@ def underbase(
             raise RipError(
                 f"alpha {cover.shape} incompatible avec l'image {a.shape[1:]}"
             )
+    elif mode == MODE_SURFACE:
+        cover = np.ones(a.shape[1:], dtype=np.float32)
     else:
-        # Un pixel est « couvert » dès qu'un canal y dépose quelque chose : le
-        # max, pas la somme, sinon un jaune clair seul ne déclencherait pas de
-        # blanc et laisserait voir le support.
+        # Le max, pas la somme : sinon un jaune clair seul ne déclencherait pas
+        # de blanc et laisserait voir le mur.
         cover = (a.max(axis=0) > threshold).astype(np.float32)
 
     return erode(cover, choke_px) * np.float32(np.clip(density, 0.0, 1.0))

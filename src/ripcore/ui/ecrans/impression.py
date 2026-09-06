@@ -603,6 +603,12 @@ class EcranImpression(tk.Frame):
                  font=self.polices.petit, justify="left", anchor="w",
                  ).pack(anchor="w", pady=(4, 12))
 
+        # Couches préparées dans Photoshop : dire ce qu'elles sont devenues.
+        # Une couche ignorée en silence se découvre devant le mur, panneau perdu.
+        for message, niveau in textes.resume_tons_directs(premier.spot_channels):
+            Bandeau(cadre, message, self.polices, niveau=niveau,
+                    ).pack(fill="x", pady=(0, 8))
+
         for nom, valeur in premier.coverage.items():
             ligne = tk.Frame(cadre, bg=p.surface)
             ligne.pack(fill="x", pady=1)

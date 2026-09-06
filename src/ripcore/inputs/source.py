@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 
 from ..errors import RipError
+from . import photoshop
 
 MM_PER_INCH = 25.4
 
@@ -68,6 +69,17 @@ def pixels_for(size_mm: float, dpi: int) -> int:
 
 
 @dataclass(slots=True)
+class Bande:
+    """Une tranche horizontale de la source, à la résolution machine."""
+
+    donnees: np.ndarray  # (C, h, W) float32 dans [0, 1]
+    alpha: np.ndarray | None = None  # (h, W), transparence de la source
+    # Tons directs nommés, tels que dessinés dans le fichier : « White »,
+    # « Vernis »… Ils priment sur toute génération automatique.
+    tons_directs: dict[str, np.ndarray] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class SourceImage:
     """Image source, rééchantillonnée à la demande vers la grille machine.
 
@@ -84,6 +96,7 @@ class SourceImage:
     _image: Any = field(default=None, repr=False)
     _alpha: Any = field(default=None, repr=False)
     _filtre: Any = field(default=None, repr=False)
+    _spots: dict = field(default_factory=dict, repr=False)
 
     @property
     def channels(self) -> int:
@@ -93,8 +106,13 @@ class SourceImage:
     def has_alpha(self) -> bool:
         return self._alpha is not None
 
-    def band(self, y0: int, y1: int) -> tuple[np.ndarray, np.ndarray | None]:
-        """Bande [y0, y1) de la sortie → (données (C, h, W), alpha (h, W) | None)."""
+    @property
+    def tons_directs(self) -> tuple[str, ...]:
+        """Noms des tons directs portés par le fichier source."""
+        return tuple(self._spots)
+
+    def band(self, y0: int, y1: int) -> Bande:
+        """Bande [y0, y1) de la sortie, à la résolution machine."""
         if not 0 <= y0 < y1 <= self.height_px:
             raise RipError(
                 f"bande [{y0}, {y1}) hors de l'image ({self.height_px} lignes)"
@@ -110,11 +128,16 @@ class SourceImage:
             données.transpose(2, 0, 1)
         ).astype(np.float32) / 255.0
 
-        alpha = None
-        if self._alpha is not None:
-            canal = self._alpha.resize(cible, self._filtre, box=boite)
-            alpha = np.asarray(canal, dtype=np.float32) / 255.0
-        return données, alpha
+        def _gris(image):
+            return np.asarray(
+                image.resize(cible, self._filtre, box=boite), dtype=np.float32
+            ) / 255.0
+
+        return Bande(
+            donnees=données,
+            alpha=_gris(self._alpha) if self._alpha is not None else None,
+            tons_directs={nom: _gris(im) for nom, im in self._spots.items()},
+        )
 
     def _boite_source(self, y0: int, y1: int) -> tuple[float, float, float, float]:
         """Région source correspondant à une bande de sortie, en coordonnées réelles.
@@ -127,11 +150,12 @@ class SourceImage:
         return (0.0, y0 * echelle, float(self._image.width), y1 * echelle)
 
     def close(self) -> None:
-        for image in (self._image, self._alpha):
+        for image in (self._image, self._alpha, *self._spots.values()):
             if image is not None:
                 image.close()
         self._image = None
         self._alpha = None
+        self._spots = {}
 
     def __enter__(self) -> SourceImage:
         return self
@@ -180,42 +204,66 @@ def load_source(
         raise RipError(f"rotation {rotate}° non supportée (0, 90, 180, 270)")
 
     filtre = getattr(Image.Resampling, FILTRES[resample])
-    image = Image.open(p)
-
-    # Un JPEG peut être décodé directement à échelle réduite par le décodeur
-    # lui-même : c'est gratuit, et ça évite de matérialiser des pixels que le
-    # rééchantillonnage jetterait de toute façon.
     besoin = (height_px, width_px) if rotate in (90, 270) else (width_px, height_px)
-    try:
-        image.draft(None, besoin)
-    except (AttributeError, ValueError):
-        pass
-    image.load()
-    icc = image.info.get("icc_profile")
+    spots: dict[str, Any] = {}
+    icc = None
 
-    image = _reduire_si_surdimensionnee(image, besoin, Image)
-
-    alpha = None
-    if image.mode in ("RGBA", "LA") or "transparency" in image.info:
-        rgba = image.convert("RGBA")
-        alpha = rgba.getchannel("A")
-        image = rgba.convert("RGB")
+    # Un TIFF Photoshop portant un ton direct a plus de quatre canaux, et
+    # Pillow refuse alors le fichier tout entier. On passe par tifffile, qui
+    # sait le lire et rend aussi les noms des couches.
+    if p.suffix.lower() in (".tif", ".tiff") and photoshop.compte_de_canaux(p) > 4:
+        lecture = photoshop.lire(p)
+        image = Image.fromarray(
+            lecture.base if lecture.base.shape[2] > 1 else lecture.base[:, :, 0],
+            lecture.mode,
+        )
+        for nom, canal in lecture.tons_directs.items():
+            spots[nom] = Image.fromarray(canal, "L")
+        for i, canal in enumerate(lecture.anonymes, start=1):
+            spots[f"Canal {i}"] = Image.fromarray(canal, "L")
+        alpha = None
     else:
-        image = _normaliser_mode(image, Image)
+        image = Image.open(p)
+        # Un JPEG peut être décodé directement à échelle réduite par le décodeur
+        # lui-même : c'est gratuit, et ça évite de matérialiser des pixels que le
+        # rééchantillonnage jetterait de toute façon.
+        try:
+            image.draft(None, besoin)
+        except (AttributeError, ValueError):
+            pass
+        image.load()
+        icc = image.info.get("icc_profile")
 
+        alpha = None
+        if image.mode in ("RGBA", "LA") or "transparency" in image.info:
+            rgba = image.convert("RGBA")
+            alpha = rgba.getchannel("A")
+            image = rgba.convert("RGB")
+        else:
+            image = _normaliser_mode(image, Image)
+
+    # La réduction et l'orientation s'appliquent à toutes les couches ensemble :
+    # un ton direct décalé d'un pixel par rapport à la couleur se verrait.
+    facteur = _facteur_de_reduction(image, besoin)
+    if facteur > 1:
+        image = image.reduce(facteur)
+        alpha = alpha.reduce(facteur) if alpha is not None else None
+        spots = {nom: im.reduce(facteur) for nom, im in spots.items()}
+
+    transpositions = []
     if rotate:
-        transposition = {
+        transpositions.append({
             90: Image.Transpose.ROTATE_270,   # sens horaire
             180: Image.Transpose.ROTATE_180,
             270: Image.Transpose.ROTATE_90,
-        }[rotate]
+        }[rotate])
+    if mirror:
+        transpositions.append(Image.Transpose.FLIP_LEFT_RIGHT)
+    for transposition in transpositions:
         image = image.transpose(transposition)
         if alpha is not None:
             alpha = alpha.transpose(transposition)
-    if mirror:
-        image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-        if alpha is not None:
-            alpha = alpha.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        spots = {nom: im.transpose(transposition) for nom, im in spots.items()}
 
     return SourceImage(
         width_px=width_px,
@@ -226,6 +274,7 @@ def load_source(
         _image=image,
         _alpha=alpha,
         _filtre=filtre,
+        _spots=spots,
     )
 
 
@@ -261,8 +310,8 @@ def _normaliser_mode(image, Image):
     )
 
 
-def _reduire_si_surdimensionnee(image, besoin: tuple[int, int], Image):
-    """Réduit une source qui a plus de pixels que la machine n'en imprimera.
+def _facteur_de_reduction(image, besoin: tuple[int, int]) -> int:
+    """Facteur entier de réduction d'une source plus détaillée que nécessaire.
 
     Ce détail n'est **pas** le contournement que l'on fait dans certains RIP —
     réduire puis ré-agrandir, qui détruit du détail réel. Ici on ne retire que
@@ -276,22 +325,50 @@ def _reduire_si_surdimensionnee(image, besoin: tuple[int, int], Image):
     besoin_l, besoin_h = besoin
     facteur = min(image.width // max(1, besoin_l * 2),
                   image.height // max(1, besoin_h * 2))
-    if facteur < 2:
-        return image
-    try:
-        return image.reduce(facteur)
-    except (AttributeError, ValueError):  # pragma: no cover - Pillow ancien
-        return image
+    return max(1, facteur)
 
 
 def mesurer(path: str | Path, rotate: int = 0) -> tuple[int, int, float | None, float | None]:
     """(largeur, hauteur, dpi_x, dpi_y) de la source, rotation prise en compte."""
     Image = _pillow()
-    with Image.open(path) as image:
+    p = Path(path)
+    # Même détour que pour la lecture : Pillow ne sait pas ouvrir un TIFF à
+    # plus de quatre canaux, pas même pour en connaître les dimensions.
+    if p.suffix.lower() in (".tif", ".tiff") and photoshop.compte_de_canaux(p) > 4:
+        return _mesurer_multicanal(p, rotate)
+    with Image.open(p) as image:
         largeur, hauteur = image.size
         dpi = image.info.get("dpi")
     dpi_x = float(dpi[0]) if dpi else None
     dpi_y = float(dpi[1]) if dpi and len(dpi) > 1 else dpi_x
+    if rotate in (90, 270):
+        largeur, hauteur = hauteur, largeur
+        dpi_x, dpi_y = dpi_y, dpi_x
+    return largeur, hauteur, dpi_x, dpi_y
+
+
+def _mesurer_multicanal(
+    p: Path, rotate: int
+) -> tuple[int, int, float | None, float | None]:
+    """Dimensions d'un TIFF à canaux supplémentaires, sans le décoder."""
+    import tifffile  # noqa: PLC0415
+
+    with tifffile.TiffFile(str(p)) as tf:
+        page = tf.pages[0]
+        largeur, hauteur = int(page.imagewidth), int(page.imagelength)
+        dpi_x = dpi_y = None
+        resolution = page.tags.get("XResolution")
+        if resolution is not None:
+            valeur = resolution.value
+            dpi_x = float(valeur[0]) / float(valeur[1]) if isinstance(
+                valeur, tuple
+            ) else float(valeur)
+        resolution = page.tags.get("YResolution")
+        if resolution is not None:
+            valeur = resolution.value
+            dpi_y = float(valeur[0]) / float(valeur[1]) if isinstance(
+                valeur, tuple
+            ) else float(valeur)
     if rotate in (90, 270):
         largeur, hauteur = hauteur, largeur
         dpi_x, dpi_y = dpi_y, dpi_x

@@ -51,6 +51,35 @@ encre. Trois conséquences dans le code :
 Mesuré : 402 Mo au pic sur le panneau de 1,5 m, contre une vingtaine de
 gigaoctets avant correction.
 
+## Les tons directs viennent du fichier, pas du calcul
+
+Le RIP sait générer une sous-couche blanche à partir de l'image. L'atelier, lui,
+la dessine souvent lui-même dans Photoshop, en **couche de ton direct**, et
+exporte en TIFF. Deux obstacles concrets, tous deux vérifiés plutôt que
+supposés :
+
+* **Pillow refuse tout TIFF à plus de quatre canaux** — pas la couche en trop,
+  le fichier entier (`UnidentifiedImageError`). Un CMJN + blanc en fait cinq.
+  D'où `inputs/photoshop.py`, qui passe par `tifffile`.
+* **Le nom de la couche n'est pas dans le TIFF standard.** Il vit dans un bloc
+  de ressources Photoshop (tag 34377, ressource 1006 : chaînes Pascal). Sans
+  lui, un canal supplémentaire n'est qu'un gris de plus et rien ne dit s'il faut
+  y mettre du blanc ou du vernis.
+
+Règle de conception, dans `_assemble` : **une couche dessinée prime sur toute
+génération.** Elle porte une intention — un blanc volontairement débordant, un
+relief localisé, un vernis sélectif — qu'aucune heuristique ne retrouve. Une
+couche dont le nom n'est pas reconnu, ou qui vise une encre absente de la
+machine, est ignorée **et signalée** : jamais affectée au jugé. Le manifeste
+consigne quelle couche a alimenté quelle encre, ce qui est la seule façon, devant
+un tirage raté, de savoir d'où venait le blanc.
+
+Un piège reste hors de notre portée : BetterPrinter applique **son propre
+retrait** au blanc (`nInkIndent`, §16). Il s'ajoute à `white_choke_px` ; cumulés,
+les deux laissent un liseré de support sur les bords. Le retrait se règle d'un
+seul côté — c'est documenté dans le profil support, faute de pouvoir lire la
+configuration de BetterPrinter depuis ici.
+
 ## Où nous nous branchons
 
 Le dossier SAV (§30) décrit deux points d'entrée pour un logiciel tiers :
@@ -102,7 +131,10 @@ ripcore/
 │   ├── inklimit.py     limite par canal + limite totale
 │   └── white.py        sous-couche blanche, vernis, érosion (choke)
 │
-├── inputs/           lecture en flux (bande par bande), rendu PDF Ghostscript
+├── inputs/
+│   ├── source.py       lecture en flux (bande par bande), rotation, réduction
+│   ├── photoshop.py    TIFF à canaux de ton direct (blanc, vernis) et leurs noms
+│   └── pdf.py          rendu PDF/PS par Ghostscript
 ├── panneaux.py       DÉCOUPE MURALE — largeur illimitée, hauteur bornée
 ├── targets/          mires de calibration
 ├── calibration.py    mesures → échelles et courbes
@@ -193,9 +225,13 @@ impose des bandes contiguës — et le dit si on lui en donne d'autres.
 
 ### Moyen terme — qualité
 
-- Tons directs : lire les séparations nommées d'un PDF pour piloter un canal
-  `spot` (aujourd'hui laissé à zéro plutôt que rempli au hasard).
-- Vernis sélectif à partir d'un calque nommé.
+- Tons directs : les **couches nommées d'un TIFF Photoshop** sont lues et
+  passent telles quelles (blanc, vernis). Reste à faire de même pour les
+  **séparations nommées d'un PDF** — un canal `spot` alimenté depuis un PDF est
+  aujourd'hui laissé à zéro plutôt que rempli au hasard.
+- Épaisseur de relief : plusieurs passes de vernis se commandent par `nMultyOil`
+  côté BetterPrinter, pas depuis le `.prn`. Le RIP fournit la couche ; le nombre
+  de passes reste un réglage de la presse.
 - Mise en page : imbrication, répétition, marges, repères de coupe.
 - Repères de raccord imprimés en bord de panneau, pour caler la machine à la
   position suivante sans mesurer.

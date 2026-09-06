@@ -347,6 +347,9 @@ class MediaProfile:
     white_density: float = 1.0
     white_choke_px: int = 2
     white_mode: str = "surface"  # "surface" | "encre" — voir color.white
+    # Noms de couche Photoshop → encre machine, p. ex. {"Blanc" = "W"}.
+    # Prime sur les correspondances usuelles reconnues par inputs.photoshop.
+    spot_map: dict[str, str] = field(default_factory=dict)
     notes: str = ""
     source: Path | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -381,6 +384,9 @@ class MediaProfile:
             white_density=float(media.get("white_density", 1.0)),
             white_choke_px=int(media.get("white_choke_px", 2)),
             white_mode=str(media.get("white_mode", "surface")),
+            spot_map={
+                str(k): str(v) for k, v in (media.get("spot_map") or {}).items()
+            },
             notes=media.get("notes", ""),
             source=p,
             extra={k: v for k, v in media.items() if k not in _MEDIA_KNOWN},
@@ -400,6 +406,7 @@ _MEDIA_KNOWN = frozenset(
         "white_density",
         "white_choke_px",
         "white_mode",
+        "spot_map",
         "notes",
     }
 )

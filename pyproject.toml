@@ -10,8 +10,10 @@ requires-python = ">=3.11"
 dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]
-images = ["pillow>=10"]
-dev = ["pytest>=8", "pillow>=10"]
+# tifffile : Pillow refuse tout TIFF à plus de quatre canaux, c'est-à-dire
+# tout export Photoshop portant une couche de ton direct (blanc, vernis).
+images = ["pillow>=10", "tifffile>=2024.1"]
+dev = ["pytest>=8", "pillow>=10", "tifffile>=2024.1"]
 
 [project.scripts]
 rip = "ripcore.cli:main"

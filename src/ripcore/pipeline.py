@@ -29,6 +29,7 @@ from .color.inklimit import SCALE_ALL, limit_per_channel, limit_total
 from .color.white import underbase, varnish
 from .errors import RipError
 from .halftone.engines import Halftoner, make_halftoner
+from .inputs import photoshop
 from .inputs.source import (
     MM_PER_INCH,
     SourceImage,
@@ -98,6 +99,9 @@ class JobResult:
     seconds: float
     warnings: list[str] = field(default_factory=list)
     manifest: Path | None = None
+    # Couches nommées trouvées dans le fichier source → encre employée, ou ""
+    # quand la couche n'a pas été reconnue et a donc été ignorée.
+    spot_channels: dict[str, str] = field(default_factory=dict)
 
     def describe(self) -> str:
         cov = "  ".join(f"{k}={v * 100:.1f}%" for k, v in self.coverage.items())
@@ -157,11 +161,23 @@ def _assemble(
     cmyk: np.ndarray,
     media: MediaProfile,
     alpha: np.ndarray | None,
+    tons_directs: dict[str, np.ndarray] | None = None,
 ) -> np.ndarray:
-    """Répartit le CMJN séparé sur les canaux du profil, génère blanc et vernis."""
+    """Répartit le CMJN séparé sur les canaux du profil, génère blanc et vernis.
+
+    **Un ton direct dessiné dans le fichier prime sur toute génération.** Si
+    l'opérateur a préparé une couche « White » ou « Vernis » dans Photoshop,
+    c'est elle qui part sur la machine : elle porte une intention que le
+    logiciel ne saurait pas deviner — un vernis sélectif, un blanc qui déborde
+    volontairement, un relief localisé.
+    """
     h, w = cmyk.shape[1:]
     out = np.zeros((profile.n_channels, h, w), dtype=np.float32)
+    fournis = _tons_par_encre(tons_directs or {}, media)
     for i, ch in enumerate(profile.channels):
+        if ch.name in fournis:
+            out[i] = fournis[ch.name]
+            continue
         if ch.role == ROLE_PROCESS:
             try:
                 out[i] = cmyk[_CMYK_ORDER.index(ch.name)]
@@ -185,6 +201,22 @@ def _assemble(
         # ROLE_SPOT : laissé à zéro tant qu'aucune source de ton direct n'est
         # branchée — mieux vaut un canal vide qu'une encre posée au hasard.
     return out
+
+
+def _tons_par_encre(
+    tons_directs: dict[str, np.ndarray], media: MediaProfile
+) -> dict[str, np.ndarray]:
+    """Couches nommées du fichier → encres de la machine.
+
+    La table du profil média prime sur les correspondances usuelles : un atelier
+    nomme ses couches comme il l'entend, et le logiciel n'a pas à en décider.
+    """
+    resultat: dict[str, np.ndarray] = {}
+    for nom, couche in tons_directs.items():
+        encre = photoshop.encre_pour(nom, media.spot_map)
+        if encre is not None:
+            resultat[encre] = couche
+    return resultat
 
 
 def run_job(
@@ -232,6 +264,33 @@ def run_job(
     )
 
     separate, icc_label = _build_color_transform(spec, img)
+    # Consigné dans le manifeste : quelle couche du fichier a alimenté quelle
+    # encre. C'est la trace qui permet, devant un tirage raté, de savoir si le
+    # blanc venait de Photoshop ou de la génération automatique.
+    #
+    # Une couche n'est « reconnue » que si l'encre visée existe VRAIMENT sur la
+    # machine : annoncer qu'un vernis est parti sur une presse qui n'en a pas
+    # serait pire que de se taire.
+    spots_detectes = {}
+    for nom in img.tons_directs:
+        encre = photoshop.encre_pour(nom, media.spot_map)
+        spots_detectes[nom] = encre if encre in profile.channel_names else ""
+    if spots_detectes:
+        reconnus = [n for n, encre in spots_detectes.items() if encre]
+        ignores = [n for n, encre in spots_detectes.items() if not encre]
+        if reconnus:
+            warnings.append(
+                "couches du fichier utilisées telles quelles : "
+                + ", ".join(f"{n} → encre {spots_detectes[n]}" for n in reconnus)
+                + " (aucune génération automatique sur ces canaux)"
+            )
+        if ignores:
+            warnings.append(
+                "couches du fichier non reconnues et ignorées : "
+                + ", ".join(ignores)
+                + " — nommez-les dans la table des tons directs du profil "
+                "support, et vérifiez que la machine porte bien cette encre"
+            )
     if icc_label.startswith("SÉPARATION NAÏVE"):
         warnings.append(
             "aucun profil ICC de sortie : les couleurs ne sont pas gérées, "
@@ -291,10 +350,10 @@ def run_job(
     ) as writer:
         for y0 in range(0, height_px, band_lines):
             y1 = min(y0 + band_lines, height_px)
-            band, alpha = img.band(y0, y1)
+            bande = img.band(y0, y1)
 
-            cmyk = separate(band)
-            ink = _assemble(profile, cmyk, media, alpha)
+            cmyk = separate(bande.donnees)
+            ink = _assemble(profile, cmyk, media, bande.alpha, bande.tons_directs)
             if luts is not None:
                 ink = apply_luts(ink, luts)
             ink = limit_per_channel(ink, limits)
@@ -331,6 +390,7 @@ def run_job(
         icc=icc_label,
         seconds=time.monotonic() - started,
         warnings=warnings,
+        spot_channels=spots_detectes,
     )
     result.manifest = write_manifest(spec, result, header)
     return result
@@ -405,6 +465,12 @@ def write_manifest(spec: JobSpec, result: JobResult, header) -> Path:
             "linearization": (
                 str(spec.media.linearization) if spec.media.linearization else None
             ),
+        },
+        "spot_channels": {
+            "trouvés": {
+                nom: (encre or None) for nom, encre in result.spot_channels.items()
+            },
+            "table": dict(spec.media.spot_map or {}),
         },
         "halftone": result.halftone,
         "coverage": {k: round(v, 5) for k, v in result.coverage.items()},

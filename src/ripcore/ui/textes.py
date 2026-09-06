@@ -166,6 +166,37 @@ IMPRESSION_ENVOYER = "Envoyer à la machine"
 IMPRESSION_OUVRIR_DOSSIER = "Ouvrir le dossier"
 IMPRESSION_PRET = "Fichier prêt"
 
+# -- couches préparées dans Photoshop ----------------------------------------
+#
+# L'opérateur qui a dessiné sa sous-couche doit voir, en une ligne, si elle est
+# bien partie. Le cas silencieux — une couche ignorée sans le dire — coûte un
+# panneau et se découvre devant le mur.
+
+TON_DIRECT_UTILISE = "Votre couche « {couche} » a servi de {encre}."
+TON_DIRECT_IGNORE = (
+    "Couche « {couche} » ignorée : ce nom n'est associé à aucune encre. "
+    "Renommez-la (White, Vernis…) ou déclarez-la dans le profil du support."
+)
+TON_DIRECT_REMPLACE_GENERATION = (
+    "Le blanc automatique n'a pas été calculé : c'est votre couche qui part."
+)
+
+
+def resume_tons_directs(spot_channels: dict[str, str]) -> list[tuple[str, str]]:
+    """(message, niveau) pour chaque couche du fichier. Niveau « info » ou « alerte »."""
+    lignes: list[tuple[str, str]] = []
+    for couche, encre in spot_channels.items():
+        if encre:
+            lignes.append(
+                (TON_DIRECT_UTILISE.format(couche=couche, encre=nom_encre(encre)),
+                 "info")
+            )
+        else:
+            lignes.append((TON_DIRECT_IGNORE.format(couche=couche), "alerte"))
+    if any(encre == "W" for encre in spot_channels.values()):
+        lignes.append((TON_DIRECT_REMPLACE_GENERATION, "info"))
+    return lignes
+
 # -- écran Tests -------------------------------------------------------------
 
 TESTS_TITRE = "Tests machine"

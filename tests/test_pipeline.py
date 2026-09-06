@@ -621,8 +621,9 @@ class TestMemoire:
         try:
             # La source reste à sa taille d'origine (tournée), pas agrandie.
             assert sorted(img._image.size) == [400, 600]
-            bande, _ = img.band(0, 8)
-            assert bande.shape == (3, 8, 20_000)  # la bande, elle, est à l'échelle
+            bande = img.band(0, 8)
+            # La bande, elle, est bien à l'échelle machine.
+            assert bande.donnees.shape == (3, 8, 20_000)
         finally:
             img.close()
 

@@ -26,3 +26,29 @@ white_choke_px = 2
 # ink_limit_total = 2.4
 
 notes = "Valeurs de départ. À caler par essais avant toute production."
+
+# --- Tons directs préparés dans Photoshop ------------------------------------
+#
+# Le RIP lit les couches de ton direct d'un TIFF exporté depuis Photoshop
+# (canaux supplémentaires + noms). **Une couche dessinée prime sur toute
+# génération** : si le fichier porte un « White », c'est lui qui part sur la
+# machine, la sous-couche automatique ci-dessus n'est pas calculée pour ce
+# tirage. C'est voulu — la couche porte une intention (blanc débordant, relief
+# localisé, vernis sélectif) qu'aucun calcul ne devine.
+#
+# Les noms usuels sont reconnus seuls : White, Blanc, Sous-couche, Underbase,
+# Vernis, Varnish, Gloss, Relief… La table ci-dessous sert aux noms maison, et
+# prime sur les correspondances usuelles.
+#
+# [media.spot_map]
+# "Couche 1" = "W"
+# "Blanc épais" = "W"
+# "Relief mat" = "V"     # seulement si la machine porte un canal vernis
+#
+# ⚠️ DOUBLE RÉTRACTION. BetterPrinter applique lui aussi un retrait au blanc,
+# par nInkIndent (§16, BP_SPECAIL_PRINT_CONFIG), exprimé en pixels. Il s'ajoute
+# à white_choke_px ci-dessus : les deux cumulés, le blanc se rétracte deux fois
+# et un liseré de support apparaît sur les bords. Réglez le retrait d'un seul
+# côté — soit ici, soit dans BetterPrinter (nInkIndent = 0) — jamais des deux.
+# Une couche dessinée dans Photoshop n'est PAS rétractée par le RIP : le retrait
+# y est celui que l'opérateur a dessiné, plus celui de BetterPrinter.

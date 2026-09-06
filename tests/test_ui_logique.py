@@ -284,3 +284,24 @@ def test_drop_levels_relus_depuis_un_profil_ecrit(tmp_path, profil):
     relu = PrinterProfile.load(cible)
     assert relu.drop_levels.calibrated is True
     assert relu.drop_levels.densities == pytest.approx((0.0, 0.239913, 0.610021, 1.0))
+
+
+class TestResumeTonsDirects:
+    """Ce que l'opérateur lit après un travail portant des couches Photoshop."""
+
+    def test_une_couche_utilisee_est_annoncee_avec_son_encre(self):
+        lignes = textes.resume_tons_directs({"White": "W"})
+        messages = [m for m, _ in lignes]
+        assert any("White" in m and "Blanc" in m for m in messages)
+        # Et l'opérateur doit savoir que le blanc automatique n'a pas joué.
+        assert any("automatique" in m for m in messages)
+        assert all(niveau == "info" for _, niveau in lignes)
+
+    def test_une_couche_ignoree_passe_en_alerte(self):
+        """Le cas coûteux : la couche n'est pas partie et personne ne l'a vu."""
+        lignes = textes.resume_tons_directs({"Pantone 485 C": ""})
+        assert lignes[0][1] == "alerte"
+        assert "Pantone 485 C" in lignes[0][0]
+
+    def test_sans_couche_il_n_y_a_rien_a_dire(self):
+        assert textes.resume_tons_directs({}) == []

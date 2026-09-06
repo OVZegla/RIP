@@ -286,6 +286,59 @@ erreur explicite qui dit quoi faire.
 
 ---
 
+## Ce qu'on peut mettre dedans
+
+| Entrée | Lu par | Remarque |
+|---|---|---|
+| PNG, JPEG, BMP — RGB ou gris | Pillow | le cas courant |
+| TIFF CMJN | Pillow | passé tel quel si aucun profil ICC de sortie n'est réglé |
+| TIFF **avec couches de ton direct** | tifffile | blanc, vernis — voir ci-dessous |
+| PNG/TIFF avec transparence | Pillow | l'alpha pilote la sous-couche blanche |
+| 16 bits par canal | remis à l'échelle | Pillow tronquerait à 255 et sortirait blanc |
+| PDF, PostScript | `ripcore.inputs.pdf` | rendu par Ghostscript avant le RIP |
+
+Un mode qu'on ne sait pas lire est **refusé avec son nom**, jamais converti au
+jugé : une sortie blanche silencieuse coûte un tirage, un refus coûte trente
+secondes.
+
+### Le blanc préparé dans Photoshop
+
+L'atelier dessine sa sous-couche et son relief en **couche de ton direct** puis
+exporte en TIFF. C'est un canal supplémentaire du fichier : un CMJN + blanc fait
+cinq canaux par pixel. Deux conséquences qu'il fallait traiter :
+
+* **Pillow refuse le fichier entier** au-delà de quatre canaux — pas seulement
+  la couche en trop, le fichier. D'où `tifffile`.
+* **Le nom de la couche n'est pas dans le TIFF standard** mais dans un bloc de
+  ressources Photoshop (tag 34377, ressource 1006). Sans lui, un canal n'est
+  qu'un gris de plus et rien ne dit s'il s'agit de blanc ou de vernis.
+
+**Une couche dessinée prime sur toute génération.** Si le fichier porte un
+« White », c'est lui qui part sur la machine : la sous-couche automatique n'est
+pas calculée pour ce tirage. La couche porte une intention — un blanc qui déborde
+volontairement, un relief localisé, un vernis sélectif — qu'aucun calcul ne
+devine. Les noms usuels (White, Blanc, Sous-couche, Underbase, Vernis, Varnish,
+Gloss, Relief…) sont reconnus seuls, accents et casse indifférents ; un nom
+maison se déclare dans `[media.spot_map]` du profil support.
+
+Une couche non reconnue, ou visant une encre que la machine ne porte pas, est
+**ignorée et signalée** dans les avertissements du travail et dans le manifeste.
+Elle n'est jamais affectée à une encre au jugé : poser du vernis à la place du
+blanc coûte le panneau.
+
+Le manifeste consigne quelle couche a alimenté quelle encre. Devant un tirage
+raté, c'est ce qui permet de savoir si le blanc venait de Photoshop ou du RIP.
+
+> ⚠️ **Retrait du blanc, à ne régler que d'un côté.** BetterPrinter applique son
+> propre retrait par `nInkIndent` (§16, `BP_SPECAIL_PRINT_CONFIG`). Il s'ajoute à
+> `white_choke_px` du profil support : cumulés, le blanc se rétracte deux fois et
+> un liseré de support apparaît sur les bords. Mettez `nInkIndent = 0`, ou
+> `white_choke_px = 0`, jamais les deux à une valeur non nulle. Une couche venue
+> de Photoshop n'est pas rétractée par le RIP — son retrait est celui que
+> l'opérateur a dessiné, plus celui de BetterPrinter.
+
+---
+
 ## Choix techniques qui pèsent sur la qualité
 
 **Tramage par bruit bleu, sans état.** Le masque est généré par void-and-cluster

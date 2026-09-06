@@ -32,10 +32,12 @@ from .halftone.engines import Halftoner, make_halftoner
 from .inputs.source import (
     MM_PER_INCH,
     SourceImage,
-    fit_geometry,
+    fit_size_mm,
     load_source,
     mesurer,
+    pixels_for,
 )
+from .panneaux import verifier_hauteur
 from .prnfile.writer import PrnWriter
 from .profiles import (
     ROLE_PROCESS,
@@ -191,28 +193,34 @@ def run_job(
     pass_mode = profile.pass_mode(spec.dpi_y)  # lève tôt si la résolution est inconnue
 
     # -- géométrie -----------------------------------------------------------
+    # Deux repères à ne pas confondre : celui du MUR (ce que voit l'opérateur)
+    # et celui du FICHIER machine. Sur une machine à chariot vertical, l'axe X
+    # du fichier est le vertical du mur : les deux sont donc à angle droit.
     src_w, src_h, src_dpi_x, src_dpi_y = mesurer(spec.source, spec.rotate)
-
-    width_px, height_px, width_mm, height_mm = fit_geometry(
-        src_w,
-        src_h,
-        dpi_x=spec.dpi_x,
-        dpi_y=spec.dpi_y,
-        src_dpi_x=src_dpi_x,
-        src_dpi_y=src_dpi_y,
-        width_mm=spec.width_mm,
-        height_mm=spec.height_mm,
+    mur_l_mm, mur_h_mm = fit_size_mm(
+        src_w, src_h, src_dpi_x=src_dpi_x, src_dpi_y=src_dpi_y,
+        width_mm=spec.width_mm, height_mm=spec.height_mm,
     )
-    if profile.max_width_mm and width_mm > profile.max_width_mm:
+
+    verifier_hauteur(mur_h_mm, profile.max_height_mm)
+    if profile.max_width_mm and mur_l_mm > profile.max_width_mm + 1e-6:
         raise RipError(
-            f"largeur demandée {width_mm:.1f} mm > course machine "
-            f"{profile.max_width_mm:.1f} mm"
+            f"largeur demandée {mur_l_mm:.0f} mm > bande de la machine "
+            f"{profile.max_width_mm:.0f} mm — découpez la fresque en panneaux"
         )
+
+    rotation = (spec.rotate + profile.machine_rotation) % 360
+    if profile.machine_rotation in (90, 270):
+        prn_l_mm, prn_h_mm = mur_h_mm, mur_l_mm
+    else:
+        prn_l_mm, prn_h_mm = mur_l_mm, mur_h_mm
+    width_px = pixels_for(prn_l_mm, spec.dpi_x)
+    height_px = pixels_for(prn_h_mm, spec.dpi_y)
 
     # -- chargement ----------------------------------------------------------
     img = load_source(
         spec.source, width_px=width_px, height_px=height_px,
-        resample=spec.resample, rotate=spec.rotate, mirror=spec.mirror,
+        resample=spec.resample, rotate=rotation, mirror=spec.mirror,
     )
 
     separate, icc_label = _build_color_transform(spec, img)
@@ -307,8 +315,8 @@ def run_job(
         output=spec.output,
         width_px=width_px,
         height_px=height_px,
-        width_mm=width_mm,
-        height_mm=height_mm,
+        width_mm=mur_l_mm,
+        height_mm=mur_h_mm,
         channels=profile.channel_names,
         coverage=coverage,
         halftone=ht.name,
@@ -346,15 +354,24 @@ def write_manifest(spec: JobSpec, result: JobResult, header) -> Path:
         "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "source": str(spec.source),
         "output": str(result.output),
+        # Deux repères, explicitement séparés : ce qui est mesuré sur le mur,
+        # et ce qui est écrit dans le fichier machine.
+        "wall": {
+            "width_mm": round(result.width_mm, 3),
+            "height_mm": round(result.height_mm, 3),
+            "carriage_axis": spec.printer.carriage_axis,
+            "machine_rotation_deg": spec.printer.machine_rotation,
+        },
         "geometry": {
             "width_px": result.width_px,
             "padded_width_px": header.width_px,
             "height_px": result.height_px,
-            "width_mm": round(result.width_mm, 3),
-            "height_mm": round(result.height_mm, 3),
+            "width_mm": round(result.width_px / spec.dpi_x * MM_PER_INCH, 3),
+            "height_mm": round(result.height_px / spec.dpi_y * MM_PER_INCH, 3),
             "dpi_x": spec.dpi_x,
             "dpi_y": spec.dpi_y,
             "rotate": spec.rotate,
+            "total_rotation_deg": (spec.rotate + spec.printer.machine_rotation) % 360,
             "mirror": spec.mirror,
         },
         "prn": {

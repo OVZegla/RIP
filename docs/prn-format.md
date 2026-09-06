@@ -98,6 +98,37 @@ sont à zéro.
 
 ---
 
+## 3 bis. Orientation des axes sur le mur — **[confirmé par l'exploitation]**
+
+L'axe X du `.prn` (les octets d'une ligne) est **structurellement** l'axe de
+balayage du chariot : c'est la définition d'un raster d'imprimante, pas une
+hypothèse sur cette machine-ci.
+
+Sur ce parc, le chariot balaie **verticalement** — il monte et descend le long
+de la colonne, et c'est la machine qui avance le long du mur entre les passes.
+Il s'ensuit :
+
+| Axe du fichier | Direction sur le mur | Résolution | Borne |
+|---|---|---|---|
+| X — octets par ligne | **vertical** | `dpi_x` (720) | course de la colonne |
+| Y — lignes | **horizontal** | `dpi_y` (900 / 1200) | illimitée, par panneaux |
+
+**Conséquence pratique :** un visuel préparé « à plat » sort couché d'un quart
+de tour. C'est la rotation que les opérateurs faisaient à la main dans
+UltraPrint avant chaque travail. `ripcore` l'applique lui-même, piloté par
+`carriage_axis` dans le profil imprimante — l'opérateur donne des dimensions
+sur le mur et n'a rien à tourner.
+
+**À noter :** les 720 dpi s'appliquent donc à la verticale du mur et les
+900/1200 dpi à l'horizontale, et non l'inverse.
+
+Cette information ne vient pas des binaires : elle vient de l'exploitation
+quotidienne des machines. Les 5 fichiers de production ne permettent pas de la
+trancher — trois sont des carrés, et les deux autres ne portent aucune marque
+d'orientation.
+
+---
+
 ## 4. Ordre des canaux — **[ouvert]**
 
 Le mécanisme est connu (un plan par canal, dans l'ordre), **les étiquettes ne le

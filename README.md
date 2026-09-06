@@ -29,6 +29,18 @@ une machine à plat :
 
 Sur une murale, le chariot balaie une **bande** (2 m sur ce parc) et la colonne
 monte jusqu'à sa course (2 m ici, jusqu'à 3 m sur certains modèles Friankor).
+
+Et le chariot balaie **verticalement**. L'axe X d'un fichier `.prn` étant par
+construction l'axe de balayage, il correspond donc au **vertical du mur** — les
+deux repères sont à angle droit. C'est le quart de tour que les opérateurs
+faisaient à la main dans UltraPrint avant chaque travail. `ripcore` l'applique
+lui-même (`carriage_axis` dans le profil) : on donne des dimensions sur le mur,
+et l'aperçu s'affiche d'aplomb.
+
+| Axe du fichier | Sur le mur | Résolution | Borne |
+|---|---|---|---|
+| X — octets par ligne | vertical | 720 dpi | course de la colonne |
+| Y — lignes | horizontal | 900 / 1200 dpi | illimitée, par panneaux |
 Une fresque plus haute que la colonne est **impossible** : `ripcore` refuse le
 travail plutôt que de produire un fichier tronqué. Une fresque plus large est
 **découpée en panneaux**, imprimés l'un après l'autre en déplaçant la machine.

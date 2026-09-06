@@ -16,6 +16,17 @@ bits_per_pixel = 2          # 4 tailles de goutte — champ 0x20 du .prn
 max_width_mm = 2000.0       # largeur d'une bande (course X, nMaxTripX)
 max_height_mm = 2000.0      # course de la colonne (nMaxTripY) — LIMITE DURE
 #
+# Sens de balayage du chariot, vu du mur.
+#
+# Sur cette machine le chariot monte et descend le long de la colonne : l'axe X
+# du fichier machine correspond donc au VERTICAL du mur, et ses lignes à
+# l'horizontale. Un visuel préparé « à plat » sortirait couché — c'est le quart
+# de tour que l'on faisait à la main dans UltraPrint, et que le RIP applique
+# désormais lui-même.
+#
+# Mettez "horizontal" si votre chariot balaie de gauche à droite sur le mur.
+carriage_axis = "vertical"
+#
 # La hauteur ne se contourne pas : au-delà, la tête ne monte plus.
 # La largeur, elle, s'étend en déplaçant la machine le long du mur ;
 # le logiciel découpe alors la fresque en panneaux d'une bande chacun.

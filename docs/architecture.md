@@ -11,6 +11,14 @@ l'impression à plat : **la hauteur est la limite dure, pas la largeur.** La
 colonne ne s'allonge pas. La largeur, elle, n'a pas de limite — elle se paie en
 repositionnements.
 
+**Le chariot balaie verticalement.** L'axe X d'un `.prn` étant par construction
+l'axe de balayage, le repère du fichier est à angle droit de celui du mur. Le
+RIP applique donc lui-même le quart de tour (`carriage_axis`), là où il fallait
+auparavant tourner chaque visuel à la main dans UltraPrint. Le manifeste
+consigne les deux repères séparément (`wall` et `geometry`) pour qu'aucune
+relecture ultérieure ne les confonde, et l'aperçu est remis d'aplomb avant
+affichage.
+
 Cela se traduit dans le code par deux champs de profil et un module :
 
 * `max_height_mm` — course de la colonne. `panneaux.verifier_hauteur()` refuse

@@ -223,6 +223,32 @@ def mesurer(path: str | Path, rotate: int = 0) -> tuple[int, int, float | None, 
     return largeur, hauteur, dpi_x, dpi_y
 
 
+def fit_size_mm(
+    src_width: int,
+    src_height: int,
+    *,
+    src_dpi_x: float | None = None,
+    src_dpi_y: float | None = None,
+    width_mm: float | None = None,
+    height_mm: float | None = None,
+) -> tuple[float, float]:
+    """Taille demandée, en millimètres, d'après la source et ce qui est imposé.
+
+    Priorité : dimensions demandées > dpi de la source > 300 dpi par défaut. Si
+    une seule dimension est donnée, l'autre suit le rapport d'aspect.
+    """
+    if width_mm is None and height_mm is None:
+        sx = src_dpi_x or 300.0
+        sy = src_dpi_y or sx
+        return (src_width / sx * MM_PER_INCH, src_height / sy * MM_PER_INCH)
+    if width_mm is None:
+        assert height_mm is not None
+        return (height_mm * src_width / src_height, height_mm)
+    if height_mm is None:
+        return (width_mm, width_mm * src_height / src_width)
+    return (width_mm, height_mm)
+
+
 def fit_geometry(
     src_width: int,
     src_height: int,
@@ -239,17 +265,10 @@ def fit_geometry(
     Priorité : dimensions demandées > dpi de la source > 300 dpi par défaut. Si
     une seule dimension est donnée, l'autre suit le rapport d'aspect de la source.
     """
-    if width_mm is None and height_mm is None:
-        sx = src_dpi_x or 300.0
-        sy = src_dpi_y or sx
-        width_mm = src_width / sx * MM_PER_INCH
-        height_mm = src_height / sy * MM_PER_INCH
-    elif width_mm is None:
-        assert height_mm is not None
-        width_mm = height_mm * src_width / src_height
-    elif height_mm is None:
-        height_mm = width_mm * src_height / src_width
-
+    width_mm, height_mm = fit_size_mm(
+        src_width, src_height, src_dpi_x=src_dpi_x, src_dpi_y=src_dpi_y,
+        width_mm=width_mm, height_mm=height_mm,
+    )
     return (
         pixels_for(width_mm, dpi_x),
         pixels_for(height_mm, dpi_y),

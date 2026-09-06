@@ -49,6 +49,11 @@ def render_profile(profile: PrinterProfile) -> str:
         f"max_height_mm = {_fmt(profile.max_height_mm)}"
         "    # course de la colonne — limite infranchissable",
         "",
+        "# Sens de balayage du chariot, vu du mur. « vertical » = le chariot",
+        "# monte et descend, la machine avance le long du mur : le RIP tourne",
+        "# alors le visuel d'un quart de tour lui-même.",
+        f'carriage_axis = "{profile.carriage_axis}"',
+        "",
         "# Ordre des plans dans le fichier machine, du premier au dernier.",
         "# Se relève avec le « test des couleurs » (mire channel-id).",
         f"channel_order_verified = {str(profile.channel_order_verified).lower()}",
@@ -162,6 +167,7 @@ def reorder_channels(profile: PrinterProfile, order: list[str]) -> PrinterProfil
         ink_limit_total=profile.ink_limit_total,
         max_width_mm=profile.max_width_mm,
         max_height_mm=profile.max_height_mm,
+        carriage_axis=profile.carriage_axis,
         ink_limit_total_all=profile.ink_limit_total_all,
         channel_order_verified=True,  # l'ordre vient d'un tirage : il est vérifié
         drop_levels_verified=profile.drop_levels_verified,

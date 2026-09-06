@@ -395,6 +395,98 @@ class TestEndToEnd:
         assert any(f.check == "encre/process" for f in report.errors)
 
 
+class TestReperes:
+    """Repère du mur et repère du fichier machine.
+
+    Sur une machine à chariot vertical, l'axe X du fichier .prn est le vertical
+    du mur : les deux repères sont à angle droit. C'est ce quart de tour qui
+    était fait à la main dans UltraPrint ; le RIP doit s'en charger, sinon la
+    fresque sort couchée.
+    """
+
+    def _source(self, tmp_path, taille):
+        from PIL import Image
+
+        chemin = tmp_path / f"src{taille[0]}x{taille[1]}.png"
+        Image.new("RGB", taille, (200, 30, 30)).save(chemin, dpi=(300, 300))
+        return chemin
+
+    def test_le_fichier_est_a_angle_droit_du_mur(self, tmp_path, printer):
+        """Une fresque paysage doit produire un fichier machine portrait."""
+        assert printer.machine_rotation == 90
+        src = self._source(tmp_path, (1200, 400))
+        out = tmp_path / "paysage.prn"
+        result = run_job(JobSpec(
+            source=src, output=out, printer=printer, media=MediaProfile(name="t"),
+            dpi_x=720, dpi_y=900, width_mm=60.0,
+        ))
+        manifeste = json.loads(result.manifest.read_text(encoding="utf-8"))
+        mur, fichier = manifeste["wall"], manifeste["geometry"]
+
+        # Le mur reste paysage : c'est ce que voit l'opérateur.
+        assert mur["width_mm"] > mur["height_mm"]
+        # Le fichier, lui, est portrait : hauteur du mur dans les octets/ligne.
+        assert fichier["width_mm"] < fichier["height_mm"]
+        assert fichier["width_mm"] == pytest.approx(mur["height_mm"], abs=1.0)
+        assert fichier["height_mm"] == pytest.approx(mur["width_mm"], abs=1.0)
+        assert fichier["total_rotation_deg"] == 90
+
+    def test_la_rotation_operateur_s_ajoute_a_celle_de_la_machine(
+        self, tmp_path, printer
+    ):
+        src = self._source(tmp_path, (1200, 400))
+        result = run_job(JobSpec(
+            source=src, output=tmp_path / "r.prn", printer=printer,
+            media=MediaProfile(name="t"), width_mm=40.0, rotate=90,
+        ))
+        manifeste = json.loads(result.manifest.read_text(encoding="utf-8"))
+        assert manifeste["geometry"]["total_rotation_deg"] == 180
+
+    def test_chariot_horizontal_ne_tourne_rien(self, tmp_path, printer):
+        """Une machine dont le chariot balaie horizontalement n'a rien à tourner."""
+        a_plat = PrinterProfile(
+            name=printer.name, head=printer.head,
+            bits_per_pixel=printer.bits_per_pixel, channels=printer.channels,
+            pass_mode_by_dpi_y=dict(printer.pass_mode_by_dpi_y),
+            drop_levels=printer.drop_levels,
+            ink_limit_channel=dict(printer.ink_limit_channel),
+            ink_limit_total=printer.ink_limit_total,
+            max_width_mm=printer.max_width_mm,
+            max_height_mm=printer.max_height_mm,
+            carriage_axis="horizontal",
+        )
+        assert a_plat.machine_rotation == 0
+        src = self._source(tmp_path, (1200, 400))
+        result = run_job(JobSpec(
+            source=src, output=tmp_path / "h.prn", printer=a_plat,
+            media=MediaProfile(name="t"), width_mm=60.0,
+        ))
+        manifeste = json.loads(result.manifest.read_text(encoding="utf-8"))
+        assert manifeste["geometry"]["width_mm"] == pytest.approx(60.0, abs=1.0)
+        assert manifeste["geometry"]["total_rotation_deg"] == 0
+
+    def test_la_hauteur_du_mur_reste_la_limite_dure(self, tmp_path, printer):
+        """Même après le quart de tour, c'est la hauteur du MUR qui est bornée."""
+        src = self._source(tmp_path, (400, 1200))
+        out = tmp_path / "trop-haut.prn"
+        with pytest.raises(RipError, match="la machine monte à"):
+            run_job(JobSpec(
+                source=src, output=out, printer=printer,
+                media=MediaProfile(name="t"), height_mm=2600.0,
+            ))
+        assert not out.exists()
+
+    def test_axe_de_chariot_inconnu_refuse(self, printer):
+        with pytest.raises(ProfileError, match="carriage_axis"):
+            PrinterProfile(
+                name="x", head="", bits_per_pixel=printer.bits_per_pixel,
+                channels=printer.channels,
+                pass_mode_by_dpi_y={900: 0}, drop_levels=printer.drop_levels,
+                ink_limit_channel={}, ink_limit_total=2.0, max_width_mm=100.0,
+                carriage_axis="diagonal",
+            )
+
+
 class TestNaiveSeparation:
     def test_blanc_ne_depose_rien(self):
         out = naive_rgb_to_cmyk(np.ones((3, 4, 4), dtype=np.float32))

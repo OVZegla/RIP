@@ -23,6 +23,20 @@ ROLE_PROCESS = "process"  # C, M, Y, K — passent par la conversion ICC
 ROLE_WHITE = "white"  # sous-couche / réserve blanche, générée
 ROLE_VARNISH = "varnish"  # vernis, généré
 ROLE_SPOT = "spot"  # ton direct piloté par un canal source dédié
+
+# Orientation du balayage du chariot, dans le repère du MUR.
+#
+# L'axe X d'un fichier .prn (les octets d'une ligne) est structurellement l'axe
+# de balayage du chariot : c'est la définition d'un raster d'imprimante. Sur une
+# machine murale à colonne, ce balayage est **vertical** — le chariot monte et
+# descend, et c'est la machine qui avance le long du mur entre deux passes.
+#
+# Conséquence : un visuel préparé « à plat » sort couché d'un quart de tour. Le
+# RIP applique donc lui-même la rotation, plutôt que de la laisser à l'opérateur
+# à chaque travail.
+CHARIOT_VERTICAL = "vertical"
+CHARIOT_HORIZONTAL = "horizontal"
+_AXES = frozenset({CHARIOT_VERTICAL, CHARIOT_HORIZONTAL})
 _ROLES = frozenset({ROLE_PROCESS, ROLE_WHITE, ROLE_VARNISH, ROLE_SPOT})
 
 
@@ -104,6 +118,7 @@ class PrinterProfile:
     # la machine le long du mur : au-delà d'une bande, on découpe en panneaux.
     max_width_mm: float
     max_height_mm: float = 0.0
+    carriage_axis: str = CHARIOT_VERTICAL
     ink_limit_total_all: float | None = None
     channel_order_verified: bool = False
     drop_levels_verified: bool = False
@@ -133,6 +148,11 @@ class PrinterProfile:
                 raise ProfileError(
                     f"ink_limit_channel[{name}]={limit} hors ]0, 1]"
                 )
+        if self.carriage_axis not in _AXES:
+            raise ProfileError(
+                f"carriage_axis={self.carriage_axis!r} inconnu "
+                f"({' | '.join(sorted(_AXES))})"
+            )
         n_process = len(self.channels_with_role(ROLE_PROCESS))
         if not 0.0 < self.ink_limit_total <= max(n_process, 1):
             raise ProfileError(
@@ -178,6 +198,22 @@ class PrinterProfile:
     def process_mask(self) -> np.ndarray:
         """Canaux soumis à la limite d'encre totale (TAC)."""
         return self.role_mask(ROLE_PROCESS)
+
+    @property
+    def machine_rotation(self) -> int:
+        """Quart de tour à appliquer pour poser le visuel droit sur le mur.
+
+        90° quand le chariot balaie verticalement : la largeur du mur part alors
+        dans les *lignes* du fichier, sa hauteur dans les *octets par ligne*.
+        """
+        return 90 if self.carriage_axis == CHARIOT_VERTICAL else 0
+
+    @property
+    def dpi_mur(self) -> tuple[str, str]:
+        """Quel dpi s'applique à quelle direction du mur, pour l'affichage."""
+        if self.machine_rotation:
+            return ("dpi_y", "dpi_x")  # (horizontal, vertical)
+        return ("dpi_x", "dpi_y")
 
     def panneaux_pour(self, largeur_mm: float) -> int:
         """Nombre de bandes verticales nécessaires pour couvrir cette largeur."""
@@ -263,6 +299,9 @@ class PrinterProfile:
                 ),
                 max_width_mm=float(printer.get("max_width_mm", 0.0)),
                 max_height_mm=float(printer.get("max_height_mm", 0.0)),
+                carriage_axis=str(
+                    printer.get("carriage_axis", CHARIOT_VERTICAL)
+                ),
                 channel_order_verified=bool(
                     printer.get("channel_order_verified", False)
                 ),

@@ -115,5 +115,14 @@ def render_preview(
         img = img.resize(
             (max(1, round(img.width * aspect)), img.height), Image.Resampling.LANCZOS
         )
+
+    # Le fichier est écrit dans le repère de la machine ; l'opérateur, lui,
+    # regarde le mur. Sur un chariot vertical les deux sont à angle droit :
+    # on remet l'aperçu d'aplomb, sans quoi il faudrait pencher la tête.
+    if profile.machine_rotation == 90:
+        img = img.transpose(Image.Transpose.ROTATE_90)
+    elif profile.machine_rotation == 270:
+        img = img.transpose(Image.Transpose.ROTATE_270)
+
     img.save(out)
     return out

@@ -395,6 +395,114 @@ class TestEndToEnd:
         assert any(f.check == "encre/process" for f in report.errors)
 
 
+class TestMemoire:
+    """Formats muraux : rien ne doit être chargé en entier.
+
+    UltraPrint est un exécutable 32 bits (il charge gsdll32.dll, ZIP32.DLL et
+    boxiqoky.x86) : son espace d'adressage plafonne à 2 Go, ce qui l'oblige à
+    tomber en panne de mémoire sur les grands formats. Le contournement d'usage
+    — réduire le visuel à l'import puis le ré-agrandir dans le RIP — détruit du
+    détail réel. Ces tests garantissent qu'on n'a pas à le faire.
+    """
+
+    def _visuel(self, tmp_path, taille, nom):
+        from PIL import Image, ImageDraw
+
+        im = Image.new("RGB", (600, 400), (255, 255, 255))
+        d = ImageDraw.Draw(im)
+        d.ellipse([50, 40, 320, 300], fill=(220, 50, 40))
+        d.rectangle([360, 60, 560, 340], fill=(30, 110, 200))
+        if taille != (600, 400):
+            im = im.resize(taille, Image.Resampling.LANCZOS)
+        chemin = tmp_path / nom
+        im.save(chemin, dpi=(300, 300))
+        return chemin
+
+    def _rip(self, source, sortie, printer):
+        run_job(JobSpec(
+            source=source, output=sortie, printer=printer,
+            media=MediaProfile(name="t"), dpi_x=720, dpi_y=900, width_mm=40.0,
+        ))
+        return PrnReader(sortie).read_all()
+
+    def test_une_source_surdimensionnee_depose_la_meme_encre(
+        self, tmp_path, printer
+    ):
+        """Réduire une source trop détaillée ne change pas ce qui sort sur le mur.
+
+        C'est ce qui distingue notre réduction du contournement manuel : on ne
+        retire que des pixels que le rééchantillonnage jetait déjà.
+
+        On ne vérifie pas l'égalité au bit près, et ce serait une mauvaise
+        exigence : passer par une réduction entière puis un Lanczos n'est pas le
+        même chemin de calcul qu'un Lanczos direct, et quelques valeurs tombent
+        de l'autre côté d'un seuil de trame. Ce qui doit être conservé, c'est
+        l'encre déposée.
+        """
+        petit = self._visuel(tmp_path, (600, 400), "petit.png")
+        enorme = self._visuel(tmp_path, (9600, 6400), "enorme.png")  # 16 fois plus
+        a = self._rip(petit, tmp_path / "a.prn", printer)
+        b = self._rip(enorme, tmp_path / "b.prn", printer)
+
+        assert a.shape == b.shape
+        # Aucun pixel ne saute plus d'une taille de goutte.
+        assert int(np.abs(a.astype(np.int16) - b.astype(np.int16)).max()) <= 1
+        # Et moins d'un pixel sur cent bouge, y compris d'un seul niveau.
+        assert float((a != b).mean()) < 0.01
+        # L'encre déposée, canal par canal, est la même.
+        densites = np.asarray(printer.drop_levels.densities, dtype=np.float64)
+        for i, nom in enumerate(printer.channel_names):
+            assert densites[a[i]].mean() == pytest.approx(
+                densites[b[i]].mean(), abs=0.002
+            ), f"encre {nom} modifiée par la réduction de source"
+
+    def test_la_hauteur_de_bande_suit_la_largeur(self):
+        """Le budget mémoire est tenu quelle que soit la taille de la fresque."""
+        from ripcore.pipeline import BUDGET_BANDE_OCTETS, _hauteur_de_bande
+
+        precedente = None
+        for largeur in (5_670, 42_724, 127_559):
+            lignes = _hauteur_de_bande(512, largeur, 5)
+            octets = lignes * largeur * 5 * 4 * 2
+            assert octets <= BUDGET_BANDE_OCTETS * 1.05, (
+                f"bande de {lignes} lignes à {largeur} px = {octets / 1e6:.0f} Mo"
+            )
+            if precedente is not None:
+                assert lignes <= precedente  # plus c'est large, plus la bande est courte
+            precedente = lignes
+
+    def test_une_source_deja_a_l_echelle_n_est_pas_touchee(self, tmp_path, printer):
+        """La marge de 2× évite de dégrader une source à peine plus grande."""
+        from ripcore.inputs.source import load_source
+
+        source = self._visuel(tmp_path, (1200, 800), "juste.png")
+        img = load_source(source, width_px=900, height_px=600)
+        try:
+            assert img._image.size == (1200, 800)
+        finally:
+            img.close()
+
+    def test_la_source_n_est_jamais_agrandie_avant_le_tramage(
+        self, tmp_path, printer
+    ):
+        """Une petite source agrandie sur le mur ne doit pas être pré-agrandie.
+
+        L'agrandissement se fait bande par bande vers la grille machine ; le
+        matérialiser d'un bloc est précisément ce qui fait exploser la mémoire.
+        """
+        from ripcore.inputs.source import load_source
+
+        petit = self._visuel(tmp_path, (600, 400), "p.png")
+        img = load_source(petit, width_px=20_000, height_px=9_000, rotate=90)
+        try:
+            # La source reste à sa taille d'origine (tournée), pas agrandie.
+            assert sorted(img._image.size) == [400, 600]
+            bande, _ = img.band(0, 8)
+            assert bande.shape == (3, 8, 20_000)  # la bande, elle, est à l'échelle
+        finally:
+            img.close()
+
+
 class TestReperes:
     """Repère du mur et repère du fichier machine.
 

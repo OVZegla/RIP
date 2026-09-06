@@ -73,6 +73,31 @@ Résultat mesuré sur le panneau de 1,5 m : **402 Mo de mémoire au pic**, 156 s
 Charger le raster d'un bloc en aurait demandé une vingtaine de gigaoctets — ce
 que faisait la première version, et que seul un essai à taille réelle a révélé.
 
+### Pourquoi UltraPrint tombe en panne de mémoire
+
+`UltraPrint.exe` charge `gsdll32.dll`, `ZIP32.DLL` et `boxiqoky.x86` : un
+processus ne peut charger des DLL 32 bits que s'il est lui-même 32 bits. Compilé
+en VC6/MFC, il plafonne donc à **2 Go d'espace d'adressage**, quelle que soit la
+RAM de la machine. Ce n'est pas un réglage, c'est une limite d'architecture.
+
+Mesure sur un travail modeste — 800 × 333 mm, source de 60 Mpx :
+
+| | |
+|---|---|
+| Raster complet en mémoire | **5 692 Mo** |
+| Plafond d'un processus 32 bits | 2 048 Mo → **dépassé** |
+| Pic mesuré avec `ripcore` | **615 Mo** |
+
+D'où le contournement d'atelier : réduire le visuel à l'import, puis le
+ré-agrandir dans le RIP. Il évite le plantage **au prix du détail** — le
+ré-agrandissement n'invente pas ce que la réduction a jeté.
+
+`ripcore` n'en a pas besoin : **donnez l'original à sa résolution native.** Si
+la source contient plus de pixels que la machine n'en imprimera, elle est
+réduite automatiquement — mais seulement de ce que le rééchantillonnage jetait
+déjà, avec une marge de 2×. Un test vérifie que l'encre déposée est identique,
+canal par canal, entre une source à l'échelle et la même 16 fois plus grande.
+
 ---
 
 ## Installation

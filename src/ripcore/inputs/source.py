@@ -172,8 +172,19 @@ def load_source(
 
     filtre = getattr(Image.Resampling, FILTRES[resample])
     image = Image.open(p)
+
+    # Un JPEG peut être décodé directement à échelle réduite par le décodeur
+    # lui-même : c'est gratuit, et ça évite de matérialiser des pixels que le
+    # rééchantillonnage jetterait de toute façon.
+    besoin = (height_px, width_px) if rotate in (90, 270) else (width_px, height_px)
+    try:
+        image.draft(None, besoin)
+    except (AttributeError, ValueError):
+        pass
     image.load()
     icc = image.info.get("icc_profile")
+
+    image = _reduire_si_surdimensionnee(image, besoin, Image)
 
     alpha = None
     if image.mode in ("RGBA", "LA") or "transparency" in image.info:
@@ -207,6 +218,29 @@ def load_source(
         _alpha=alpha,
         _filtre=filtre,
     )
+
+
+def _reduire_si_surdimensionnee(image, besoin: tuple[int, int], Image):
+    """Réduit une source qui a plus de pixels que la machine n'en imprimera.
+
+    Ce détail n'est **pas** le contournement que l'on fait dans certains RIP —
+    réduire puis ré-agrandir, qui détruit du détail réel. Ici on ne retire que
+    des pixels que le rééchantillonnage vers la grille machine jetterait de
+    toute façon : la sortie est inchangée, seule la mémoire baisse.
+
+    On garde une marge de 2× avant réduction, et on réduit par facteur entier
+    (filtre moyenneur) avant le Lanczos final — un enchaînement qui produit
+    moins de crénelage qu'un Lanczos unique depuis une source énorme.
+    """
+    besoin_l, besoin_h = besoin
+    facteur = min(image.width // max(1, besoin_l * 2),
+                  image.height // max(1, besoin_h * 2))
+    if facteur < 2:
+        return image
+    try:
+        return image.reduce(facteur)
+    except (AttributeError, ValueError):  # pragma: no cover - Pillow ancien
+        return image
 
 
 def mesurer(path: str | Path, rotate: int = 0) -> tuple[int, int, float | None, float | None]:

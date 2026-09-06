@@ -332,6 +332,26 @@ class PrinterProfile:
         return out
 
 
+SPOT_DIRECT = "direct"    # 255 = pleine encre, comme les canaux CMJN
+SPOT_INVERSE = "inverse"  # 0 = pleine encre
+SPOT_POLARITES = (SPOT_DIRECT, SPOT_INVERSE)
+
+
+def _polarite(valeur: Any, source: Path) -> str:
+    """Valide le sens de lecture des couches de ton direct.
+
+    Refuser une valeur inconnue plutôt que retomber sur le défaut : une faute de
+    frappe qui passe inaperçue ici sort le blanc en négatif sur le mur.
+    """
+    v = str(valeur).strip().lower()
+    if v not in SPOT_POLARITES:
+        raise ProfileError(
+            f"{source} : spot_polarity = {valeur!r} inconnu "
+            f"({' | '.join(SPOT_POLARITES)})"
+        )
+    return v
+
+
 @dataclass(frozen=True, slots=True)
 class MediaProfile:
     """Support + jeu d'encre : ce qui change d'un média à l'autre."""
@@ -350,6 +370,12 @@ class MediaProfile:
     # Noms de couche Photoshop → encre machine, p. ex. {"Blanc" = "W"}.
     # Prime sur les correspondances usuelles reconnues par inputs.photoshop.
     spot_map: dict[str, str] = field(default_factory=dict)
+    # Sens de la couche : "direct" = 255 pleine encre (comme les canaux CMJN du
+    # même fichier), "inverse" = 0 pleine encre. Photoshop n'écrit pas ses
+    # canaux supplémentaires de la même façon selon la version et l'option
+    # d'export ; une couche lue à l'envers sort en négatif, ce qui se voit
+    # immédiatement. `rip layers` tranche la question sur un de vos fichiers.
+    spot_polarity: str = SPOT_DIRECT
     notes: str = ""
     source: Path | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -387,6 +413,7 @@ class MediaProfile:
             spot_map={
                 str(k): str(v) for k, v in (media.get("spot_map") or {}).items()
             },
+            spot_polarity=_polarite(media.get("spot_polarity", SPOT_DIRECT), p),
             notes=media.get("notes", ""),
             source=p,
             extra={k: v for k, v in media.items() if k not in _MEDIA_KNOWN},
@@ -407,6 +434,7 @@ _MEDIA_KNOWN = frozenset(
         "white_choke_px",
         "white_mode",
         "spot_map",
+        "spot_polarity",
         "notes",
     }
 )

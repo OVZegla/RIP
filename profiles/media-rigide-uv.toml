@@ -45,6 +45,24 @@ notes = "Valeurs de départ. À caler par essais avant toute production."
 # "Blanc épais" = "W"
 # "Relief mat" = "V"     # seulement si la machine porte un canal vernis
 #
+# Le NIVEAU DE GRIS de la couche dose le blanc, il n'est pas seuillé : une zone
+# peinte à 50 % dépose la moitié du blanc (un dot sur deux, donc translucide),
+# une zone à 100 % dépose un blanc couvrant. C'est ce qu'on faisait déjà dans
+# UltraPrint, et ça reste vrai ici — vérifié par test sur cinq paliers.
+#
+# ⚠️ SENS DE LA COUCHE. Selon la version de Photoshop et l'option d'export, un
+# canal supplémentaire peut être écrit avec 255 pour la pleine encre (comme les
+# canaux CMJN du même fichier) ou avec 0. Lue à l'envers, la couche sort en
+# négatif — très visible, mais autant ne pas gâcher un panneau pour le
+# découvrir. Tranchez la question en trente secondes sur un de vos fichiers :
+#
+#   rip layers mon-visuel.tif
+#
+# La commande affiche les deux lectures ; gardez celle qui correspond à ce que
+# vous avez peint. Si c'est la seconde, décommentez la ligne ci-dessous.
+#
+# spot_polarity = "inverse"     # défaut : "direct" (255 = pleine encre)
+
 # ⚠️ DOUBLE RÉTRACTION. BetterPrinter applique lui aussi un retrait au blanc,
 # par nInkIndent (§16, BP_SPECAIL_PRINT_CONFIG), exprimé en pixels. Il s'ajoute
 # à white_choke_px ci-dessus : les deux cumulés, le blanc se rétracte deux fois

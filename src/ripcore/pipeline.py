@@ -44,6 +44,7 @@ from .profiles import (
     ROLE_PROCESS,
     ROLE_VARNISH,
     ROLE_WHITE,
+    SPOT_INVERSE,
     MediaProfile,
     PrinterProfile,
 )
@@ -210,12 +211,20 @@ def _tons_par_encre(
 
     La table du profil média prime sur les correspondances usuelles : un atelier
     nomme ses couches comme il l'entend, et le logiciel n'a pas à en décider.
+
+    Le **sens** de la couche vient du profil support : selon la version de
+    Photoshop et l'option d'export, un canal supplémentaire peut être écrit avec
+    255 pour la pleine encre (comme les canaux CMJN du même fichier) ou avec 0.
+    Le niveau de gris est conservé tel quel : c'est lui qui dose le blanc, une
+    couche peinte à 50 % doit déposer 50 % d'encre.
     """
     resultat: dict[str, np.ndarray] = {}
     for nom, couche in tons_directs.items():
         encre = photoshop.encre_pour(nom, media.spot_map)
         if encre is not None:
-            resultat[encre] = couche
+            resultat[encre] = (
+                1.0 - couche if media.spot_polarity == SPOT_INVERSE else couche
+            )
     return resultat
 
 

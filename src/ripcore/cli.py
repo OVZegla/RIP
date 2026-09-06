@@ -60,6 +60,50 @@ def cmd_check(args: argparse.Namespace) -> int:
     return worst
 
 
+def cmd_layers(args: argparse.Namespace) -> int:
+    """Ce que le RIP lit dans les couches d'un TIFF, avant d'imprimer quoi que ce soit.
+
+    Sert surtout à trancher le **sens** de la couche. Photoshop n'écrit pas ses
+    canaux supplémentaires de la même façon selon la version et l'option
+    d'export : 255 peut valoir pleine encre, ou l'inverse. Plutôt que de le
+    supposer, on affiche les deux lectures d'un fichier dont l'atelier connaît
+    le contenu — celle qui correspond à ce qui a été peint est la bonne.
+    """
+    from .inputs import photoshop  # import tardif : dépend de tifffile
+
+    for chemin in args.files:
+        p = Path(chemin)
+        n = photoshop.compte_de_canaux(p)
+        if n == 0:
+            print(f"{p.name} : pas un TIFF lisible")
+            continue
+        if n <= 4:
+            print(f"{p.name} : {n} canaux, aucune couche de ton direct")
+            continue
+
+        lecture = photoshop.lire(p)
+        print(f"{p.name} — {lecture.mode} + {n - {'CMYK': 4, 'RGB': 3, 'L': 1}[lecture.mode]} couche(s)")
+        couches = list(lecture.tons_directs.items())
+        couches += [(f"(sans nom {i})", c) for i, c in enumerate(lecture.anonymes, 1)]
+        if not couches:
+            print("  aucune couche nommée — Photoshop n'a pas écrit les noms")
+        for nom, canal in couches:
+            direct = float(canal.mean()) / 255.0
+            encre = photoshop.encre_pour(nom, _table_spot(args.media))
+            destination = f"encre {encre}" if encre else "NON RECONNUE, ignorée"
+            print(f"  « {nom} » → {destination}")
+            print(f"      lue en direct  : {direct * 100:5.1f} % d'encre")
+            print(f"      lue en inverse : {(1 - direct) * 100:5.1f} % d'encre")
+        print("  Comparez avec ce que vous avez peint. Si c'est la seconde "
+              "ligne qui correspond,")
+        print("  mettez spot_polarity = \"inverse\" dans le profil du support.")
+    return 0
+
+
+def _table_spot(media_path: str | None) -> dict[str, str]:
+    return MediaProfile.load(media_path).spot_map if media_path else {}
+
+
 def cmd_preview(args: argparse.Namespace) -> int:
     from .preview import render_preview  # import tardif : dépend de Pillow
 
@@ -250,6 +294,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="ne pas relire le raster (rapide)")
     s.add_argument("-v", "--verbose", action="store_true")
     s.set_defaults(func=cmd_check)
+
+    s = sub.add_parser(
+        "layers",
+        help="lister les couches de ton direct d'un TIFF (blanc, vernis)",
+    )
+    s.add_argument("files", nargs="+")
+    s.add_argument("--media", help="profil support TOML (pour sa table spot_map)")
+    s.set_defaults(func=cmd_layers)
 
     s = sub.add_parser("preview", help="rendre un aperçu PNG d'un .prn")
     s.add_argument("file")

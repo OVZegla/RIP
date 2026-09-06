@@ -177,6 +177,46 @@ class TestPipeline:
         assert temoin.coverage["W"] > 0.95
         assert temoin.spot_channels == {}
 
+    def test_les_niveaux_de_gris_de_la_couche_sont_respectes(self, tmp_path, printer):
+        """C'est ce qui permet de doser le blanc : 50 % dessiné, 50 % déposé.
+
+        L'atelier peint sa couche à 50 % sur une zone et à 100 % sur une autre
+        pour obtenir un blanc translucide ici et couvrant là. La couche n'est
+        donc pas un masque : c'est un dosage, et il doit traverser la chaîne
+        sans être arrondi ni seuillé.
+        """
+        from ripcore.halftone import density_of
+        from ripcore.prnfile import PrnReader
+
+        niveaux_voulus = (0, 64, 128, 191, 255)
+        h, w = 300, len(niveaux_voulus) * 40
+        couche = np.zeros((h, w), np.uint8)
+        for i, v in enumerate(niveaux_voulus):
+            couche[:, i * 40 : (i + 1) * 40] = v
+        # Aucune couleur : on isole le blanc de tout autre effet.
+        src = ecrire_tiff(tmp_path / "degres.tif", np.zeros((h, w, 4), np.uint8),
+                          {"White": couche})
+
+        out = tmp_path / "degres.prn"
+        result = self._job(printer, src, out)
+        assert result.coverage["W"] == pytest.approx(
+            np.mean(niveaux_voulus) / 255, abs=0.02
+        )
+
+        # Le RIP a tourné le visuel d'un quart de tour horaire : les colonnes
+        # de la source sont devenues les lignes du fichier machine, dans le
+        # même ordre (colonne de gauche → première ligne). On relit là-dedans.
+        plan = PrnReader(out).read_all()[4:5]
+        encre = density_of(
+            plan, np.asarray(printer.drop_levels.densities, dtype=np.float32)
+        )[0]
+        bande = encre.shape[0] // len(niveaux_voulus)
+        for i, voulu in enumerate(niveaux_voulus):
+            zone = encre[i * bande + 8 : (i + 1) * bande - 8]
+            assert zone.mean() == pytest.approx(voulu / 255, abs=0.02), (
+                f"palier {voulu} mal restitué"
+            )
+
     def test_les_couleurs_ne_sont_pas_touchees_par_la_couche(self, tmp_path, printer):
         """La couche supplémentaire ne doit pas être confondue avec du process."""
         h, w = 300, 200
@@ -245,6 +285,39 @@ class TestPipeline:
         assert result.spot_channels == {"Vernis": ""}
         assert any("non reconnues" in a for a in result.warnings)
 
+    def test_le_sens_de_la_couche_se_regle_au_profil(self, tmp_path, printer):
+        """Photoshop n'écrit pas toujours 255 pour la pleine encre.
+
+        Une couche lue à l'envers sort en négatif. Le sens est donc un réglage
+        du profil support, pas une supposition enfouie dans le code.
+        """
+        from ripcore.profiles import SPOT_INVERSE
+
+        h, w = 300, 200
+        couche = np.full((h, w), 64, np.uint8)  # 25 % en lecture directe
+        src = ecrire_tiff(tmp_path / "sens.tif", np.zeros((h, w, 4), np.uint8),
+                          {"White": couche})
+
+        direct = self._job(printer, src, tmp_path / "direct.prn")
+        assert direct.coverage["W"] == pytest.approx(64 / 255, abs=0.02)
+
+        inverse = self._job(
+            printer, src, tmp_path / "inverse.prn",
+            media=MediaProfile(name="t", white_underbase=True,
+                               spot_polarity=SPOT_INVERSE),
+        )
+        assert inverse.coverage["W"] == pytest.approx(1 - 64 / 255, abs=0.02)
+
+    def test_un_sens_mal_orthographie_est_refuse(self, tmp_path):
+        """Une faute de frappe qui retomberait sur le défaut sortirait en négatif."""
+        from ripcore.errors import ProfileError
+
+        profil = tmp_path / "m.toml"
+        profil.write_text('[media]\nname = "x"\nspot_polarity = "inversé"\n',
+                          encoding="utf-8")
+        with pytest.raises(ProfileError, match="spot_polarity"):
+            MediaProfile.load(profil)
+
     def test_le_manifeste_consigne_les_couches(self, tmp_path, printer):
         """Devant un tirage raté, savoir d'où venait le blanc."""
         h, w = 300, 200
@@ -259,3 +332,41 @@ class TestPipeline:
             "White": "W", "Pantone 485 C": None,
         }
         assert manifeste["spot_channels"]["table"] == {"Ma couche": "V"}
+
+
+class TestCommandeLayers:
+    """`rip layers` : trancher le sens d'une couche sur un fichier de l'atelier."""
+
+    def test_les_deux_lectures_sont_affichees(self, tmp_path, capsys):
+        from ripcore.cli import main
+
+        h, w = 300, 200
+        couche = np.zeros((h, w), np.uint8)
+        couche[: h // 2] = 128  # 50 % sur la moitié → 25 % de la surface
+        src = ecrire_tiff(tmp_path / "x.tif", np.zeros((h, w, 4), np.uint8),
+                          {"White": couche})
+
+        assert main(["layers", str(src)]) == 0
+        sortie = capsys.readouterr().out
+        assert "White" in sortie and "encre W" in sortie
+        assert "25.1 %" in sortie   # lecture directe
+        assert "74.9 %" in sortie   # lecture inverse
+
+    def test_un_fichier_sans_couche_le_dit(self, tmp_path, capsys):
+        from ripcore.cli import main
+
+        plat = tmp_path / "plat.tif"
+        tifffile.imwrite(plat, np.zeros((50, 50, 4), np.uint8),
+                         photometric="separated")
+        assert main(["layers", str(plat)]) == 0
+        assert "aucune couche de ton direct" in capsys.readouterr().out
+
+    def test_un_fichier_illisible_ne_fait_pas_tomber_la_commande(
+        self, tmp_path, capsys
+    ):
+        from ripcore.cli import main
+
+        faux = tmp_path / "faux.tif"
+        faux.write_bytes(b"pas un tiff")
+        assert main(["layers", str(faux)]) == 0
+        assert "pas un TIFF lisible" in capsys.readouterr().out

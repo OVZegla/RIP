@@ -197,6 +197,9 @@ rip rip visuel.tif -o job.prn \
    --media   profiles/media-rigide-uv.toml \
    --width-mm 1200
 
+# 2 bis. Que contient un TIFF Photoshop ? (couches blanc / vernis)
+rip layers visuel.tif
+
 # 3. Regarder avant d'imprimer
 rip preview job.prn --profile profiles/friankor-i1600.toml -o apercu.png
 
@@ -320,6 +323,31 @@ volontairement, un relief localisé, un vernis sélectif — qu'aucun calcul ne
 devine. Les noms usuels (White, Blanc, Sous-couche, Underbase, Vernis, Varnish,
 Gloss, Relief…) sont reconnus seuls, accents et casse indifférents ; un nom
 maison se déclare dans `[media.spot_map]` du profil support.
+
+**Le niveau de gris dose le blanc, il n'est pas seuillé.** Une zone peinte à
+50 % dépose la moitié du blanc — un dot sur deux, donc translucide ; à 100 %, un
+blanc couvrant. C'est le réglage qu'on faisait déjà dans UltraPrint et il reste
+valable. Vérifié par test sur cinq paliers :
+
+| peint dans Photoshop | encre déposée, relue dans le `.prn` |
+|---|---|
+| 0 % | 0,0 % |
+| 25 % | 25,1 % |
+| 50 % | 50,2 % |
+| 75 % | 74,9 % |
+| 100 % | 100,0 % |
+
+L'épaisseur, en revanche, ne vient pas de là : elle se règle en **nombre de
+passes** (`nMultyWhiteInk` côté BetterPrinter). Le gris module la couverture,
+les passes modulent l'opacité — deux leviers différents.
+
+> **Le sens de la couche est à vérifier une fois.** Selon la version de
+> Photoshop et l'option d'export, un canal supplémentaire peut valoir 255 pour la
+> pleine encre ou 0. Lu à l'envers, le blanc sort en négatif. `rip layers
+> mon-visuel.tif` affiche les deux lectures sur un de vos fichiers ; gardez celle
+> qui correspond à ce que vous avez peint, et réglez `spot_polarity` dans le
+> profil support si besoin. Défaut : `direct` (255 = pleine encre, comme les
+> canaux CMJN du même fichier).
 
 Une couche non reconnue, ou visant une encre que la machine ne porte pas, est
 **ignorée et signalée** dans les avertissements du travail et dans le manifeste.

@@ -102,13 +102,42 @@ canal par canal, entre une source à l'échelle et la même 16 fois plus grande.
 
 ## Installation
 
+### Windows — le poste d'atelier
+
+1. **Python 3.11 ou plus**, depuis [python.org](https://www.python.org/downloads/).
+   Cochez **« Add python.exe to PATH »** sur le premier écran. N'installez pas
+   Python depuis le Microsoft Store : il lui manque des composants nécessaires à
+   l'interface.
+2. Récupérez le dépôt :
+   ```
+   git clone https://github.com/OVZegla/RIP
+   ```
+3. Double-cliquez sur **« Installer ou mettre a jour.bat »**. Il détecte Python,
+   récupère la dernière version, installe les composants et vérifie que tout
+   répond. Comptez deux à trois minutes la première fois.
+4. Double-cliquez sur **« Lancer l'atelier.bat »**. Épinglez-le à la barre des
+   tâches.
+
+Le même fichier `Installer ou mettre a jour.bat` sert ensuite à mettre à jour :
+il fait le `git pull` et réinstalle ce qui a changé.
+
+### En ligne de commande
+
 ```bash
-pip install -e ".[images]"     # numpy + Pillow (Pillow embarque lcms2 pour l'ICC)
+pip install -e ".[images]"     # numpy, Pillow (lcms2 pour l'ICC), tifffile
+pip install -e ".[dev]"        # en plus : pytest, pour lancer les tests
 apt install ghostscript        # seulement si vous rippez des PDF / PS
 ```
 
 Python 3.11 ou plus. Tkinter est fourni avec Python sur Windows et macOS ; sous
 Linux, `apt install python3-tk`.
+
+Vérification, qui doit répondre sans erreur :
+
+```bash
+rip --version
+python -m pytest -q          # 229 tests
+```
 
 ---
 

@@ -34,6 +34,11 @@ from ..widgets import (
     trait,
 )
 
+# Largeur utile du bandeau de reglages : 396 px de bandeau, moins les marges de
+# carte, l'ascenseur, et les 14 px du cadre de recapitulatif qui s'y imbrique.
+# C'est ce dernier niveau qui fixe la valeur : au-dela, le texte est rogne.
+LARGEUR_TEXTE = 288
+
 FORMATS = [
     ("Images et PDF", "*.tif *.tiff *.png *.jpg *.jpeg *.bmp *.webp *.pdf"),
     ("Images", "*.tif *.tiff *.png *.jpg *.jpeg *.bmp *.webp"),
@@ -53,6 +58,7 @@ class EcranImpression(tk.Frame):
         self.source: Path | None = None
         self.resultats: list = []
         self._proportions = 1.0  # hauteur / largeur du visuel
+        self._taille_native: tuple[float, float] | None = None
 
         self.var_largeur = tk.StringVar(value="2000")
         self.var_hauteur = tk.StringVar(value="1200")
@@ -97,13 +103,17 @@ class EcranImpression(tk.Frame):
         corps = tk.Frame(self, bg=p.fond, padx=28, pady=16)
         corps.pack(fill="both", expand=True)
 
-        droite = tk.Frame(corps, bg=p.fond, width=400)
-        droite.pack(side="right", fill="y", padx=(20, 0))
-        droite.pack_propagate(False)
+        # L'image d'abord, en grand : c'est elle qu'on juge. Les réglages
+        # tiennent dans un bandeau à droite, de largeur fixe, qui défile.
+        # L'inverse — réglages au centre, vignette dans un coin — obligeait à
+        # ouvrir le fichier ailleurs pour voir ce qu'on allait imprimer.
+        bandeau_reglages = tk.Frame(corps, bg=p.fond, width=396)
+        bandeau_reglages.pack(side="right", fill="y", padx=(20, 0))
+        bandeau_reglages.pack_propagate(False)
+        _, self.colonne = cadre_defilant(bandeau_reglages)
 
-        gauche_hote = tk.Frame(corps, bg=p.fond)
-        gauche_hote.pack(side="left", fill="both", expand=True)
-        _, self.colonne = cadre_defilant(gauche_hote)
+        zone_image = tk.Frame(corps, bg=p.fond)
+        zone_image.pack(side="left", fill="both", expand=True)
 
         self._carte_fichier(self.colonne)
         self._carte_taille(self.colonne)
@@ -111,7 +121,7 @@ class EcranImpression(tk.Frame):
         self._carte_couleur(self.colonne)    # avancé
         self._carte_blanc(self.colonne)
         self._carte_action(self.colonne)
-        self._colonne_droite(droite)
+        self._zone_image(zone_image)
 
     def _carte_fichier(self, parent: tk.Misc) -> None:
         p = theme.courante()
@@ -148,25 +158,39 @@ class EcranImpression(tk.Frame):
         Interrupteur(corps, textes.IMPRESSION_PROPORTIONS, self.var_lier,
                      self.polices).pack(anchor="w", pady=(16, 0))
 
+        # Taille d'origine du visuel : c'est le point de départ le plus courant,
+        # et le calculer de tête à partir des pixels et des dpi est une corvée.
+        self.bouton_native = ttk.Button(
+            corps, text=textes.TAILLE_NATIVE_BOUTON,
+            command=self._prendre_taille_native, state="disabled",
+        )
+        self.bouton_native.pack(anchor="w", pady=(14, 0))
+        self.lbl_native = tk.Label(
+            corps, text=textes.TAILLE_NATIVE_INCONNUE, bg=p.surface,
+            fg=p.texte_doux, font=self.polices.petit, anchor="w", justify="left",
+            wraplength=LARGEUR_TEXTE,
+        )
+        self.lbl_native.pack(anchor="w", fill="x", pady=(6, 0))
+
         # Récapitulatif de découpe : combien de positions de machine, et la
         # hauteur tient-elle sous la colonne.
         self.cadre_geo = tk.Frame(corps, bg=p.surface_haute, padx=14, pady=12)
         self.cadre_geo.pack(fill="x", pady=(16, 0))
         self.lbl_panneaux = tk.Label(
             self.cadre_geo, text="", bg=p.surface_haute, fg=p.texte,
-            font=self.polices.corps, anchor="w", justify="left", wraplength=460,
+            font=self.polices.corps, anchor="w", justify="left", wraplength=LARGEUR_TEXTE,
         )
         self.lbl_panneaux.pack(anchor="w")
         self.lbl_hauteur = tk.Label(
             self.cadre_geo, text="", bg=p.surface_haute, fg=p.texte_doux,
-            font=self.polices.petit, anchor="w", justify="left", wraplength=460,
+            font=self.polices.petit, anchor="w", justify="left", wraplength=LARGEUR_TEXTE,
         )
         self.lbl_hauteur.pack(anchor="w", pady=(4, 0))
 
         self.champ_recouvrement = Champ(
             corps, textes.MURAL_RECOUVREMENT, self.var_recouvrement, self.polices,
             largeur=6, suffixe="mm", aide=textes.MURAL_RECOUVREMENT_AIDE,
-            largeur_aide=520, sur_changement=self._maj_geometrie,
+            largeur_aide=LARGEUR_TEXTE, sur_changement=self._maj_geometrie,
         )
 
     def _carte_rendu(self, parent: tk.Misc) -> None:
@@ -191,7 +215,7 @@ class EcranImpression(tk.Frame):
 
         self.lbl_aide_rendu = tk.Label(
             corps, text="", bg=p.surface, fg=p.texte_faible,
-            font=self.polices.minuscule, wraplength=520, justify="left", anchor="w",
+            font=self.polices.minuscule, wraplength=LARGEUR_TEXTE, justify="left", anchor="w",
         )
         self.lbl_aide_rendu.pack(anchor="w", pady=(10, 0))
 
@@ -203,7 +227,7 @@ class EcranImpression(tk.Frame):
               largeur=20).pack(side="left", fill="x", expand=True, padx=(0, 14))
         tk.Frame(ligne2, bg=p.surface, width=1).pack(side="left")
         Interrupteur(corps, textes.IMPRESSION_MIROIR, self.var_miroir, self.polices,
-                     aide=textes.IMPRESSION_MIROIR_AIDE, largeur_aide=480,
+                     aide=textes.IMPRESSION_MIROIR_AIDE, largeur_aide=LARGEUR_TEXTE,
                      ).pack(anchor="w", fill="x", pady=(16, 0))
 
     def _carte_couleur(self, parent: tk.Misc) -> None:
@@ -228,7 +252,7 @@ class EcranImpression(tk.Frame):
 
         self.lbl_aide_intention = tk.Label(
             corps, text="", bg=p.surface, fg=p.texte_faible,
-            font=self.polices.minuscule, wraplength=520, justify="left", anchor="w",
+            font=self.polices.minuscule, wraplength=LARGEUR_TEXTE, justify="left", anchor="w",
         )
         self.lbl_aide_intention.pack(anchor="w", pady=(10, 0))
 
@@ -245,7 +269,7 @@ class EcranImpression(tk.Frame):
               ).pack(side="left", fill="x", expand=True)
         self.lbl_aide_encre = tk.Label(
             corps, text="", bg=p.surface, fg=p.texte_faible,
-            font=self.polices.minuscule, wraplength=520, justify="left", anchor="w",
+            font=self.polices.minuscule, wraplength=LARGEUR_TEXTE, justify="left", anchor="w",
         )
         self.lbl_aide_encre.pack(anchor="w", pady=(10, 0))
 
@@ -256,7 +280,7 @@ class EcranImpression(tk.Frame):
         corps = self.carte_blanc.corps()
 
         Interrupteur(corps, textes.IMPRESSION_BLANC, self.var_blanc, self.polices,
-                     aide=textes.IMPRESSION_BLANC_AIDE, largeur_aide=480,
+                     aide=textes.IMPRESSION_BLANC_AIDE, largeur_aide=LARGEUR_TEXTE,
                      ).pack(anchor="w", fill="x")
 
         self.reglages_blanc = tk.Frame(corps, bg=p.surface)
@@ -290,22 +314,29 @@ class EcranImpression(tk.Frame):
             corps, text="", bg=p.surface, fg=p.texte_doux, font=self.polices.petit,
         )
 
-    def _colonne_droite(self, parent: tk.Misc) -> None:
+        # Le compte rendu du travail se lit là où on a cliqué pour le lancer.
+        self.cadre_resultat = tk.Frame(corps, bg=p.surface)
+        self.cadre_resultat.pack(fill="x")
+
+    def _zone_image(self, parent: tk.Misc) -> None:
+        """L'aperçu occupe toute la place restante, et grandit avec la fenêtre."""
         p = theme.courante()
-        carte = Carte(parent, titre="Aperçu", polices=self.polices)
+        carte = Carte(parent, polices=self.polices, marge=14)
         carte.pack(fill="both", expand=True)
         corps = carte.corps()
 
-        self.apercu = ZoneApercu(corps, largeur=340, hauteur=270)
-        self.apercu.pack()
-        tk.Label(
-            corps, text="Ce qui sera réellement déposé sur le mur, grain compris.",
-            bg=p.surface, fg=p.texte_faible, font=self.polices.minuscule,
-            wraplength=340, justify="left", anchor="w",
-        ).pack(anchor="w", pady=(10, 0))
+        ligne = tk.Frame(corps, bg=p.surface)
+        ligne.pack(fill="x", pady=(0, 10))
+        tk.Label(ligne, text="Aperçu", bg=p.surface, fg=p.texte,
+                 font=self.polices.section, anchor="w").pack(side="left")
+        self.lbl_legende_apercu = tk.Label(
+            ligne, text=textes.APERCU_AVANT, bg=p.surface, fg=p.texte_faible,
+            font=self.polices.minuscule, anchor="e",
+        )
+        self.lbl_legende_apercu.pack(side="right")
 
-        self.cadre_resultat = tk.Frame(corps, bg=p.surface)
-        self.cadre_resultat.pack(fill="both", expand=True, pady=(16, 0))
+        self.apercu = ZoneApercu(corps, largeur=560, hauteur=420)
+        self.apercu.pack(fill="both", expand=True)
 
     # -- mode ------------------------------------------------------------------
 
@@ -340,21 +371,63 @@ class EcranImpression(tk.Frame):
         self._lire_proportions()
         self.bouton_preparer.activer(True)
         self._vider_resultat()
-        self.apercu.vider("Cliquez sur « Préparer le fichier »")
+        # On montre le visuel tout de suite : attendre le rip pour le voir
+        # obligeait à l'ouvrir dans une autre fenêtre pour vérifier le cadrage.
+        self.lbl_legende_apercu.configure(text=textes.APERCU_AVANT)
+        try:
+            self.apercu.montrer(self.source)
+        except Exception:
+            self.apercu.vider(textes.APERCU_ILLISIBLE)
 
     def _lire_proportions(self) -> None:
-        if self.source is None or self.source.suffix.lower() == ".pdf":
+        """Relève les proportions ET la taille d'origine du visuel.
+
+        On passe par ``mesurer`` et non par Pillow : Pillow refuse tout TIFF à
+        plus de quatre canaux — donc tout export Photoshop portant une couche de
+        blanc — et l'atelier se retrouverait sans proportions ni taille, sans
+        savoir pourquoi.
+        """
+        self._taille_native = None
+        if self.source is None or self.source.suffix.lower() in (".pdf", ".ps", ".eps"):
             return  # une page PDF n'est mesurée qu'au rendu
         try:
-            from PIL import Image  # noqa: PLC0415
+            from ...inputs.source import fit_size_mm, mesurer  # noqa: PLC0415
 
-            with Image.open(self.source) as im:
-                largeur, hauteur = im.size
+            largeur, hauteur, dpi_x, dpi_y = mesurer(self.source)
         except Exception:
+            self._maj_taille_native()
             return  # un fichier illisible sera signalé à la préparation
-        if largeur:
-            self._proportions = hauteur / largeur
-            self._appliquer_proportions("largeur")
+        if not largeur:
+            return
+        self._proportions = hauteur / largeur
+        if dpi_x:
+            self._taille_native = fit_size_mm(
+                largeur, hauteur, src_dpi_x=dpi_x, src_dpi_y=dpi_y
+            )
+        self._maj_taille_native()
+        self._appliquer_proportions("largeur")
+
+    def _maj_taille_native(self) -> None:
+        """Affiche la taille d'origine, et n'offre le bouton que si elle existe."""
+        if self._taille_native is None:
+            self.lbl_native.configure(text=textes.TAILLE_NATIVE_INCONNUE)
+            self.bouton_native.configure(state="disabled")
+            return
+        l, h = self._taille_native
+        self.lbl_native.configure(text=textes.TAILLE_NATIVE.format(l=l, h=h))
+        self.bouton_native.configure(state="normal")
+
+    def _prendre_taille_native(self) -> None:
+        if self._taille_native is None:
+            return
+        l, h = self._taille_native
+        self._maj_en_cours = True
+        try:
+            self.var_largeur.set(f"{l:.0f}")
+            self.var_hauteur.set(f"{h:.0f}")
+        finally:
+            self._maj_en_cours = False
+        self._maj_geometrie()
 
     def _largeur_changee(self) -> None:
         self._appliquer_proportions("largeur")
@@ -569,8 +642,9 @@ class EcranImpression(tk.Frame):
         self._mode_travail(False)
         try:
             self.apercu.montrer(charge[0][1])
+            self.lbl_legende_apercu.configure(text=textes.APERCU_APRES)
         except Exception:
-            self.apercu.vider("Aperçu indisponible")
+            self.apercu.vider(textes.APERCU_INDISPONIBLE)
         self._montrer_resultat(charge)
         self.app.rafraichir_historique()
 

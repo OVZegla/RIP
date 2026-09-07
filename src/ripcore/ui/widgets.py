@@ -415,7 +415,13 @@ class Champ(tk.Frame):
 
 
 class ZoneApercu(tk.Canvas):
-    """Cadre d'aperçu, avec un texte d'attente tant qu'il n'y a rien à montrer."""
+    """Aperçu qui occupe toute la place qu'on lui donne.
+
+    L'atelier juge un visuel en le voyant grand, pas dans une vignette. La zone
+    se redimensionne donc avec la fenêtre et redessine l'image à la volée — on
+    garde le fichier d'origine plutôt que l'image réduite, sinon l'agrandissement
+    partirait d'une miniature et sortirait floue.
+    """
 
     def __init__(self, parent: tk.Misc, largeur: int = 380, hauteur: int = 300) -> None:
         p = theme.courante()
@@ -426,26 +432,60 @@ class ZoneApercu(tk.Canvas):
         self._largeur = largeur
         self._hauteur = hauteur
         self._image = None  # référence gardée : Tk ne la retient pas lui-même
+        self._source = None
+        self._message = "L'aperçu s'affichera ici"
+        self._redessin = None
+        self.bind("<Configure>", self._sur_redimension)
         self.vider()
+
+    # -- redimensionnement -----------------------------------------------------
+
+    def _sur_redimension(self, evenement) -> None:
+        if evenement.width < 2 or evenement.height < 2:
+            return
+        if (evenement.width, evenement.height) == (self._largeur, self._hauteur):
+            return
+        self._largeur, self._hauteur = evenement.width, evenement.height
+        # Redessiner à chaque pixel de déplacement de la poignée saccaderait :
+        # on attend que l'utilisateur ait fini de tirer.
+        if self._redessin is not None:
+            self.after_cancel(self._redessin)
+        self._redessin = self.after(90, self._redessiner)
+
+    def _redessiner(self) -> None:
+        self._redessin = None
+        if self._source is None:
+            self.vider(self._message)
+        else:
+            self.montrer(self._source)
+
+    # -- contenu ---------------------------------------------------------------
 
     def vider(self, message: str = "L'aperçu s'affichera ici") -> None:
         p = theme.courante()
         self.delete("all")
         self._image = None
+        self._source = None
+        self._message = message
         self.configure(bg=p.surface_haute, highlightbackground=p.bordure)
         self.create_text(
-            self._largeur // 2, self._hauteur // 2, text=message,
-            fill=p.texte_faible, width=self._largeur - 40, justify="center",
+            max(self._largeur // 2, 1), max(self._hauteur // 2, 1), text=message,
+            fill=p.texte_faible, width=max(self._largeur - 40, 80), justify="center",
         )
 
     def montrer(self, chemin) -> None:
         from PIL import Image, ImageTk  # noqa: PLC0415
 
-        with Image.open(chemin) as im:
-            im = im.convert("RGB")
-            im.thumbnail((self._largeur - 16, self._hauteur - 16),
-                         Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(im)
+        self._source = chemin
+        cible = (max(self._largeur - 24, 32), max(self._hauteur - 24, 32))
+        try:
+            with Image.open(chemin) as im:
+                im = im.convert("RGB")
+                im.thumbnail(cible, Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(im)
+        except (OSError, ValueError):
+            self.vider("Aperçu illisible")
+            return
         self.delete("all")
         self._image = photo  # sans cette référence, l'image disparaît
         self.create_image(self._largeur // 2, self._hauteur // 2, image=photo)

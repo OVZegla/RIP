@@ -60,6 +60,21 @@ def cmd_check(args: argparse.Namespace) -> int:
     return worst
 
 
+def cmd_compare(args: argparse.Namespace) -> int:
+    """Comparer un .prn d'UltraPrint au nôtre, pour le même visuel."""
+    from .diagnostics import empreinte, rapport  # import tardif : dépend de numpy
+
+    profil = _load_printer(args.profile) if args.profile else None
+    densites = None
+    if profil is not None:
+        import numpy as np  # noqa: PLC0415
+
+        densites = np.asarray(profil.drop_levels.densities, dtype=np.float32)
+    print(rapport(empreinte(args.reference, densites),
+                  empreinte(args.notre, densites), profil))
+    return 0
+
+
 def cmd_layers(args: argparse.Namespace) -> int:
     """Ce que le RIP lit dans les couches d'un TIFF, avant d'imprimer quoi que ce soit.
 
@@ -302,6 +317,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("files", nargs="+")
     s.add_argument("--media", help="profil support TOML (pour sa table spot_map)")
     s.set_defaults(func=cmd_layers)
+
+    s = sub.add_parser(
+        "compare",
+        help="comparer un .prn d'UltraPrint au nôtre (ordre des plans, taille)",
+    )
+    s.add_argument("reference", help="le .prn produit par UltraPrint")
+    s.add_argument("notre", help="le .prn produit par ripcore")
+    s.add_argument("--profile", help="profil imprimante TOML, pour nommer les encres")
+    s.set_defaults(func=cmd_compare)
 
     s = sub.add_parser("preview", help="rendre un aperçu PNG d'un .prn")
     s.add_argument("file")

@@ -229,6 +229,10 @@ rip rip visuel.tif -o job.prn \
 # 2 bis. Que contient un TIFF Photoshop ? (couches blanc / vernis)
 rip layers visuel.tif
 
+# 2 ter. Comparer notre .prn a celui d'UltraPrint (meme visuel, meme taille)
+#         Leve l'ordre des plans et l'ecart de taille SANS imprimer.
+rip compare ultraprint.prn notre.prn --profile profiles/friankor-i1600.toml
+
 # 3. Regarder avant d'imprimer
 rip preview job.prn --profile profiles/friankor-i1600.toml -o apercu.png
 
@@ -309,7 +313,7 @@ bien » : sans elle, aucun profil ICC ne peut donner une couleur juste.
 | En-tête `.prn` 48 o, champ par champ | **confirmé** — code du lecteur `PreviewPrn.dll` + 5 fichiers de production, recoupés par un contrôle géométrique indépendant (3 carrés exacts) |
 | Raster planaire par canal, MSB d'abord | **confirmé** — lecteur + masques `ipht.dll` |
 | `pass_mode` (champ 0x24) à 900 et 1200 dpi | **observé** sur 5 fichiers — toute autre résolution est refusée, pas extrapolée |
-| Ordre des canaux | **inconnu** — mire `channel-id` |
+| Ordre des canaux | **inconnu** — mire `channel-id`, ou `rip compare` contre un `.prn` d'UltraPrint du même visuel (sans encre) |
 | Échelle des tailles de goutte | **inconnue** — mire `drop-wedge` |
 | Syntaxe de `SetPrintFile` / `SetPrintPara` | **inconnue** — capture Wireshark d'une impression UltraPrint (voir [docs/architecture.md](docs/architecture.md)) |
 

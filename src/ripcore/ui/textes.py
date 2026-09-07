@@ -164,7 +164,21 @@ MURAL_RECOUVREMENT_AIDE = (
 IMPRESSION_PREPARATION = "Préparation en cours…"
 IMPRESSION_ENVOYER = "Envoyer à la machine"
 IMPRESSION_OUVRIR_DOSSIER = "Ouvrir le dossier"
+TAILLE_NATIVE_BOUTON = "Taille d'origine"
+TAILLE_NATIVE = "Le visuel fait {l:.0f} × {h:.0f} mm à sa définition d'origine."
+TAILLE_NATIVE_INCONNUE = (
+    "Ce fichier ne dit pas à quelle taille il a été préparé : indiquez-la."
+)
+
 IMPRESSION_PRET = "Fichier prêt"
+
+# Deux images très différentes passent dans la même zone : le visuel tel qu'on
+# l'a choisi, puis ce que la machine déposera vraiment. Le dire évite de croire
+# que le grain du tramage est un défaut du fichier source.
+APERCU_AVANT = "le visuel tel qu'il a été choisi"
+APERCU_APRES = "ce qui sera déposé sur le mur, grain compris"
+APERCU_ILLISIBLE = "Ce fichier ne peut pas être affiché"
+APERCU_INDISPONIBLE = "Aperçu indisponible"
 
 # -- couches préparées dans Photoshop ----------------------------------------
 #

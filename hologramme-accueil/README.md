@@ -27,7 +27,36 @@ puis ouvrir <http://localhost:8765/> dans **Chrome ou Edge**.
 Pour changer le prénom, le ton ou les consignes de l'hôtesse : en haut de `chat.js` (`PRENOM`, `CONSIGNE`, `ACCUEIL`).
 Les réponses de démonstration sont dans le tableau `DEMO` du même fichier.
 
-## L'avatar
+## Avatar réaliste : une vraie personne filmée
+
+Déposez deux vidéos dans le dossier `videos/` et la page les utilise automatiquement à la place du personnage 3D :
+
+| Fichier | Contenu | Durée |
+|---|---|---|
+| `videos/repos.mp4` | la personne attend : sourire, regard caméra, petits mouvements naturels | 10 à 20 s |
+| `videos/parle.mp4` | la personne parle naturellement face caméra (n'importe quel texte) | 10 à 20 s |
+
+`.webm` est aussi accepté, y compris avec transparence. Sans `parle`, la vidéo `repos` sert pour tout.
+
+**Le tournage** (un smartphone suffit) :
+- fond **vert uni** (tissu ou papier, 20 à 30 € en ligne), bien éclairé et sans plis ; un mur blanc ou bleu uni marche aussi, moins proprement ;
+- la personne à 1 m du fond pour éviter son ombre et les reflets verts, pas de vêtement vert ;
+- téléphone sur pied, **à la verticale**, sans zoom ni mouvement ; cadrage en pied ou en buste, au choix ;
+- pour `repos`, terminer dans la même position qu'au début : la boucle ne se verra pas ;
+- exporter en MP4 (H.264) 720p ou 1080p.
+
+La page détecte seule la couleur du fond, la retire, pose la personne sur blanc, projette son ombre sur le mur
+derrière elle et ajoute une ombre au sol si les pieds sont visibles. Elle bascule en fondu de `repos` à `parle`
+pendant les réponses. Réglages (tolérance du détourage, ombre, taille) en haut de `video.js`.
+
+À savoir :
+- **Droit à l'image** : la personne filmée doit avoir donné son accord écrit pour cet usage.
+- **Synchronisation des lèvres** : la vidéo `parle` est générique, les lèvres ne suivent pas exactement les mots.
+  Pour une vraie synchronisation, il faut un service d'avatar IA à partir d'une photo ou d'une vidéo de la personne
+  (HeyGen, D-ID : payants au-delà de l'essai) ou un outil libre comme LivePortrait ou MuseTalk (gratuit, mais il
+  faut une carte graphique NVIDIA).
+
+## L'avatar 3D (démonstration, sans vidéo)
 
 `avatar/Michelle.glb` est le personnage d'exemple de three.js (Mixamo). La pose d'accueil (mains jointes),
 la respiration et les hochements de tête quand elle parle sont calculés dans `avatar.js`.
